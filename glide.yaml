@@ -1,0 +1,52 @@
+package: github.com/projectcalico/cni-plugin
+import:
+- package: github.com/sirupsen/logrus
+  version: v1.0.4
+- package: github.com/containernetworking/cni
+  subpackages:
+  - pkg/skel
+  - pkg/types
+  - pkg/types/020
+  - pkg/types/current
+  - pkg/version
+- package: github.com/containernetworking/plugins
+  version: v0.6.0
+  subpackages:
+  - pkg/ip
+  - pkg/ipam
+  - pkg/ns
+- package: github.com/mcuadros/go-version
+- package: github.com/onsi/ginkgo
+- package: github.com/onsi/gomega
+  subpackages:
+  - gexec
+- package: github.com/projectcalico/libcalico-go
+  version: bb940fa9d94126edc25a81ee09c8e59f696dc90a
+  subpackages:
+  - lib/apiconfig
+  - lib/apis/v3
+  - lib/backend
+  - lib/backend/k8s/conversion
+  - lib/clientv3
+  - lib/errors
+  - lib/ipam
+  - lib/logutils
+  - lib/names
+  - lib/net
+  - lib/options
+- package: github.com/vishvananda/netlink
+- package: k8s.io/apimachinery
+  subpackages:
+  - pkg/apis/meta/v1
+- package: k8s.io/client-go
+  subpackages:
+  - kubernetes
+  - tools/clientcmd
+- package: k8s.io/api
+  subpackages:
+  - core/v1
+# A number of packages pull in x/sys but it's important that we get a recent one for the x/crypto package.
+# Most notably, containernetworking/plugins wants a version from ~2 years ago.
+# It should also be safe to take the latest here (it's generally just adding more symbols)
+- package: golang.org/x/sys
+  version: 1b2967e3c290b7c545b3db0deeda16e9be4f98a2
