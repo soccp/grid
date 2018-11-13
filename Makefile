@@ -63,8 +63,8 @@ LOCAL_IP_ENV?=$(shell ip route get 8.8.8.8 | head -1 | awk '{print $$7}')
 # fail if unable to download
 CURL=curl -sSf
 
-K8S_VERSION?=v1.11.3
-CNI_VERSION=v0.7.1
+K8S_VERSION?=1.10.4
+CNI_VERSION=v0.6.0
 
 # Get version from git.
 GIT_VERSION?=$(shell git describe --tags --dirty)
@@ -148,7 +148,7 @@ vendor: glide.yaml
 
 # Default the libcalico repo and version but allow them to be overridden
 LIBCALICO_REPO?=github.com/projectcalico/libcalico-go
-LIBCALICO_VERSION?=$(shell git ls-remote git@github.com:projectcalico/libcalico-go master 2>/dev/null | cut -f 1)
+LIBCALICO_VERSION?=$(shell git ls-remote git@github.com:projectcalico/libcalico-go release-v3.2 2>/dev/null | cut -f 1)
 
 ## Update libcalico pin in glide.yaml
 update-libcalico:
@@ -317,7 +317,7 @@ run-k8s-apiserver: stop-k8s-apiserver run-etcd
 	docker run --detach --net=host \
 	  --name calico-k8s-apiserver \
 	  -v `pwd`/testutils/private.key:/private.key \
-	  gcr.io/google_containers/hyperkube-$(ARCH):$(K8S_VERSION) \
+	  gcr.io/google_containers/hyperkube-$(ARCH):v$(K8S_VERSION) \
 	  /hyperkube apiserver \
             --etcd-servers=http://$(LOCAL_IP_ENV):2379 \
 	    --service-cluster-ip-range=10.101.0.0/16 \
@@ -328,7 +328,7 @@ run-k8s-controller: stop-k8s-controller run-k8s-apiserver
 	docker run --detach --net=host \
 	  --name calico-k8s-controller \
 	  -v `pwd`/testutils/private.key:/private.key \
-	  gcr.io/google_containers/hyperkube-$(ARCH):$(K8S_VERSION) \
+	  gcr.io/google_containers/hyperkube-$(ARCH):v$(K8S_VERSION) \
 	  /hyperkube controller-manager \
             --master=127.0.0.1:8080 \
 	    --min-resync-period=3m \
@@ -493,7 +493,7 @@ endif
 ## Run kube-proxy
 run-kube-proxy:
 	-docker rm -f calico-kube-proxy
-	docker run --name calico-kube-proxy -d --net=host --privileged gcr.io/google_containers/hyperkube:$(K8S_VERSION) /hyperkube proxy --master=http://127.0.0.1:8080 --v=2
+	docker run --name calico-kube-proxy -d --net=host --privileged gcr.io/google_containers/hyperkube:v$(K8S_VERSION) /hyperkube proxy --master=http://127.0.0.1:8080 --v=2
 
 .PHONY: test-watch
 ## Run the unit tests, watching for changes.
