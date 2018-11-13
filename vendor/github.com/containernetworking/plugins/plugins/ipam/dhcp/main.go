@@ -33,19 +33,16 @@ const socketPath = "/run/cni/dhcp.sock"
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "daemon" {
 		var pidfilePath string
-		var hostPrefix string
 		daemonFlags := flag.NewFlagSet("daemon", flag.ExitOnError)
 		daemonFlags.StringVar(&pidfilePath, "pidfile", "", "optional path to write daemon PID to")
-		daemonFlags.StringVar(&hostPrefix, "hostprefix", "", "optional prefix to netns")
 		daemonFlags.Parse(os.Args[2:])
 
-		if err := runDaemon(pidfilePath, hostPrefix); err != nil {
+		if err := runDaemon(pidfilePath); err != nil {
 			log.Printf(err.Error())
 			os.Exit(1)
 		}
 	} else {
-		// TODO: implement plugin version
-		skel.PluginMain(cmdAdd, cmdGet, cmdDel, version.All, "TODO")
+		skel.PluginMain(cmdAdd, cmdDel, version.All)
 	}
 }
 
@@ -68,14 +65,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 func cmdDel(args *skel.CmdArgs) error {
 	result := struct{}{}
 	if err := rpcCall("DHCP.Release", args, &result); err != nil {
-		return err
+		return fmt.Errorf("error dialing DHCP daemon: %v", err)
 	}
 	return nil
-}
-
-func cmdGet(args *skel.CmdArgs) error {
-	// TODO: implement
-	return fmt.Errorf("not implemented")
 }
 
 func rpcCall(method string, args *skel.CmdArgs, result interface{}) error {

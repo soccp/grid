@@ -22,13 +22,15 @@ import (
 	"reflect"
 
 	"github.com/kelseyhightower/envconfig"
-	"github.com/projectcalico/go-yaml-wrapper"
+	yaml "github.com/projectcalico/go-yaml-wrapper"
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	api "github.com/projectcalico/libcalico-go/lib/apis/v1"
 	"github.com/projectcalico/libcalico-go/lib/apis/v1/unversioned"
 	"github.com/projectcalico/libcalico-go/lib/backend"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
+	"github.com/projectcalico/libcalico-go/lib/ipam"
+	"github.com/projectcalico/libcalico-go/lib/net"
 	validator "github.com/projectcalico/libcalico-go/lib/validator/v1"
 	log "github.com/sirupsen/logrus"
 )
@@ -98,6 +100,31 @@ func (c *Client) WorkloadEndpoints() WorkloadEndpointInterface {
 func (c *Client) BGPPeers() BGPPeerInterface {
 	return newBGPPeers(c)
 }
+
+// IPAM returns an interface for managing IP address assignment and releasing.
+func (c *Client) IPAM() ipam.Interface {
+	return ipam.NewIPAMClient(c.Backend, poolAccessor{})
+}
+
+type poolAccessor struct {
+	client *Client
+}
+
+/*func (p poolAccessor) GetEnabledPools(ipVersion int, hostname string) ([]net.IPNet, string, error) {
+	pools, err := p.client.IPPools().List(api.IPPoolMetadata{})
+	if err != nil {
+		return nil, err
+	}
+	enabled := []net.IPNet{}
+	for _, pool := range pools.Items {
+		if pool.Spec.Disabled {
+			continue
+		} else {
+			enabled = append(enabled, pool.Metadata.CIDR)
+		}
+	}
+	return enabled, nil
+}*/
 
 // Config returns an interface for managing system configuration..
 func (c *Client) Config() ConfigInterface {

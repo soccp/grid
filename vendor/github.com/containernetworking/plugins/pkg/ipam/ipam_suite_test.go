@@ -23,5 +23,5 @@ import (
 
 func TestIpam(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "pkg/ipam")
+	RunSpecs(t, "Ipam Suite")
 }

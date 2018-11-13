@@ -32,12 +32,6 @@ import (
 
 type NetConf struct {
 	types.NetConf
-
-	// support chaining for master interface and IP decisions
-	// occurring prior to running ipvlan plugin
-	RawPrevResult *map[string]interface{} `json:"prevResult"`
-	PrevResult    *current.Result         `json:"-"`
-
 	Master string `json:"master"`
 	Mode   string `json:"mode"`
 	MTU    int    `json:"mtu"`
@@ -55,31 +49,8 @@ func loadConf(bytes []byte) (*NetConf, string, error) {
 	if err := json.Unmarshal(bytes, n); err != nil {
 		return nil, "", fmt.Errorf("failed to load netconf: %v", err)
 	}
-	// Parse previous result
-	if n.RawPrevResult != nil {
-		resultBytes, err := json.Marshal(n.RawPrevResult)
-		if err != nil {
-			return nil, "", fmt.Errorf("could not serialize prevResult: %v", err)
-		}
-		res, err := version.NewResult(n.CNIVersion, resultBytes)
-		if err != nil {
-			return nil, "", fmt.Errorf("could not parse prevResult: %v", err)
-		}
-		n.RawPrevResult = nil
-		n.PrevResult, err = current.NewResultFromResult(res)
-		if err != nil {
-			return nil, "", fmt.Errorf("could not convert result to current version: %v", err)
-		}
-	}
 	if n.Master == "" {
-		if n.PrevResult == nil {
-			return nil, "", fmt.Errorf(`"master" field is required. It specifies the host interface name to virtualize`)
-		}
-		if len(n.PrevResult.Interfaces) == 1 && n.PrevResult.Interfaces[0].Name != "" {
-			n.Master = n.PrevResult.Interfaces[0].Name
-		} else {
-			return nil, "", fmt.Errorf("chained master failure. PrevResult lacks a single named interface")
-		}
+		return nil, "", fmt.Errorf(`"master" field is required. It specifies the host interface name to virtualize`)
 	}
 	return n, n.CNIVersion, nil
 }
@@ -172,26 +143,19 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	var result *current.Result
-	// Configure iface from PrevResult if we have IPs and an IPAM
-	// block has not been configured
-	if n.IPAM.Type == "" && n.PrevResult != nil && len(n.PrevResult.IPs) > 0 {
-		result = n.PrevResult
-	} else {
-		// run the IPAM plugin and get back the config to apply
-		r, err := ipam.ExecAdd(n.IPAM.Type, args.StdinData)
-		if err != nil {
-			return err
-		}
-		// Convert whatever the IPAM result was into the current Result type
-		result, err = current.NewResultFromResult(r)
-		if err != nil {
-			return err
-		}
+	// run the IPAM plugin and get back the config to apply
+	r, err := ipam.ExecAdd(n.IPAM.Type, args.StdinData)
+	if err != nil {
+		return err
+	}
+	// Convert whatever the IPAM result was into the current Result type
+	result, err := current.NewResultFromResult(r)
+	if err != nil {
+		return err
+	}
 
-		if len(result.IPs) == 0 {
-			return errors.New("IPAM plugin returned missing IP config")
-		}
+	if len(result.IPs) == 0 {
+		return errors.New("IPAM plugin returned missing IP config")
 	}
 	for _, ipc := range result.IPs {
 		// All addresses belong to the ipvlan interface
@@ -218,12 +182,9 @@ func cmdDel(args *skel.CmdArgs) error {
 		return err
 	}
 
-	// On chained invocation, IPAM block can be empty
-	if n.IPAM.Type != "" {
-		err = ipam.ExecDel(n.IPAM.Type, args.StdinData)
-		if err != nil {
-			return err
-		}
+	err = ipam.ExecDel(n.IPAM.Type, args.StdinData)
+	if err != nil {
+		return err
 	}
 
 	if args.Netns == "" {
@@ -233,7 +194,7 @@ func cmdDel(args *skel.CmdArgs) error {
 	// There is a netns so try to clean up. Delete can be called multiple times
 	// so don't return an error if the device is already removed.
 	err = ns.WithNetNSPath(args.Netns, func(_ ns.NetNS) error {
-		if err := ip.DelLinkByName(args.IfName); err != nil {
+		if _, err := ip.DelLinkByNameAddr(args.IfName, netlink.FAMILY_V4); err != nil {
 			if err != ip.ErrLinkNotFound {
 				return err
 			}
@@ -245,11 +206,5 @@ func cmdDel(args *skel.CmdArgs) error {
 }
 
 func main() {
-	// TODO: implement plugin version
-	skel.PluginMain(cmdAdd, cmdGet, cmdDel, version.All, "TODO")
-}
-
-func cmdGet(args *skel.CmdArgs) error {
-	// TODO: implement
-	return fmt.Errorf("not implemented")
+	skel.PluginMain(cmdAdd, cmdDel, version.All)
 }

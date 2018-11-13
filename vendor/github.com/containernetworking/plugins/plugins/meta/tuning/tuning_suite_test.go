@@ -23,5 +23,5 @@ import (
 
 func TestTuning(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "plugins/meta/tuning")
+	RunSpecs(t, "tuning Suite")
 }

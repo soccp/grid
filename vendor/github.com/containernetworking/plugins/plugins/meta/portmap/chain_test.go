@@ -1,4 +1,4 @@
-// Copyright 2017-2018 CNI authors
+// Copyright 2017 CNI authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import (
 	"runtime"
 
 	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/coreos/go-iptables/iptables"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -41,7 +40,7 @@ var _ = Describe("chain tests", func() {
 		currNs, err := ns.GetCurrentNS()
 		Expect(err).NotTo(HaveOccurred())
 
-		testNs, err := testutils.NewNS()
+		testNs, err := ns.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 
 		tlChainName := fmt.Sprintf("cni-test-%d", rand.Intn(10000000))
@@ -50,12 +49,8 @@ var _ = Describe("chain tests", func() {
 		testChain = chain{
 			table:       TABLE,
 			name:        chainName,
+			entryRule:   []string{"-d", "203.0.113.1"},
 			entryChains: []string{tlChainName},
-			entryRules:  [][]string{{"-d", "203.0.113.1"}},
-			rules: [][]string{
-				{"-m", "comment", "--comment", "test 1", "-j", "RETURN"},
-				{"-m", "comment", "--comment", "test 2", "-j", "RETURN"},
-			},
 		}
 
 		ipt, err = iptables.NewWithProtocol(iptables.ProtocolIPv4)
@@ -95,7 +90,11 @@ var _ = Describe("chain tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Create the chain
-		err = testChain.setup(ipt)
+		chainRules := [][]string{
+			{"-m", "comment", "--comment", "test 1", "-j", "RETURN"},
+			{"-m", "comment", "--comment", "test 2", "-j", "RETURN"},
+		}
+		err = testChain.setup(ipt, chainRules)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Verify the chain exists
@@ -152,11 +151,15 @@ var _ = Describe("chain tests", func() {
 	It("creates chains idempotently", func() {
 		defer cleanup()
 
-		err := testChain.setup(ipt)
+		// Create the chain
+		chainRules := [][]string{
+			{"-m", "comment", "--comment", "test", "-j", "RETURN"},
+		}
+		err := testChain.setup(ipt, chainRules)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Create it again!
-		err = testChain.setup(ipt)
+		err = testChain.setup(ipt, chainRules)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Make sure there are only two rules
@@ -164,21 +167,24 @@ var _ = Describe("chain tests", func() {
 		rules, err := ipt.List(TABLE, testChain.name)
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(len(rules)).To(Equal(3))
+		Expect(len(rules)).To(Equal(2))
 
 	})
 
 	It("deletes chains idempotently", func() {
 		defer cleanup()
 
-		err := testChain.setup(ipt)
+		// Create the chain
+		chainRules := [][]string{
+			{"-m", "comment", "--comment", "test", "-j", "RETURN"},
+		}
+		err := testChain.setup(ipt, chainRules)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = testChain.teardown(ipt)
 		Expect(err).NotTo(HaveOccurred())
 
 		chains, err := ipt.ListChains(TABLE)
-		Expect(err).NotTo(HaveOccurred())
 		for _, chain := range chains {
 			if chain == testChain.name {
 				Fail("Chain was not deleted")
@@ -188,7 +194,6 @@ var _ = Describe("chain tests", func() {
 		err = testChain.teardown(ipt)
 		Expect(err).NotTo(HaveOccurred())
 		chains, err = ipt.ListChains(TABLE)
-		Expect(err).NotTo(HaveOccurred())
 		for _, chain := range chains {
 			if chain == testChain.name {
 				Fail("Chain was not deleted")

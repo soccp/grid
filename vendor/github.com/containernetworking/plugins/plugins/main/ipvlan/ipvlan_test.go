@@ -33,86 +33,13 @@ import (
 
 const MASTER_NAME = "eth0"
 
-func ipvlanAddDelTest(conf, IFNAME string, originalNS ns.NetNS) {
-	targetNs, err := testutils.NewNS()
-	Expect(err).NotTo(HaveOccurred())
-	defer targetNs.Close()
-
-	args := &skel.CmdArgs{
-		ContainerID: "dummy",
-		Netns:       targetNs.Path(),
-		IfName:      IFNAME,
-		StdinData:   []byte(conf),
-	}
-
-	var result *current.Result
-	err = originalNS.Do(func(ns.NetNS) error {
-		defer GinkgoRecover()
-
-		r, _, err := testutils.CmdAddWithArgs(args, func() error {
-			return cmdAdd(args)
-		})
-		Expect(err).NotTo(HaveOccurred())
-
-		result, err = current.GetResult(r)
-		Expect(err).NotTo(HaveOccurred())
-
-		Expect(len(result.Interfaces)).To(Equal(1))
-		Expect(result.Interfaces[0].Name).To(Equal(IFNAME))
-		Expect(len(result.IPs)).To(Equal(1))
-		return nil
-	})
-	Expect(err).NotTo(HaveOccurred())
-
-	// Make sure ipvlan link exists in the target namespace
-	err = targetNs.Do(func(ns.NetNS) error {
-		defer GinkgoRecover()
-
-		link, err := netlink.LinkByName(IFNAME)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(link.Attrs().Name).To(Equal(IFNAME))
-
-		hwaddr, err := net.ParseMAC(result.Interfaces[0].Mac)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(link.Attrs().HardwareAddr).To(Equal(hwaddr))
-
-		addrs, err := netlink.AddrList(link, syscall.AF_INET)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(len(addrs)).To(Equal(1))
-		return nil
-	})
-	Expect(err).NotTo(HaveOccurred())
-
-	err = originalNS.Do(func(ns.NetNS) error {
-		defer GinkgoRecover()
-
-		err = testutils.CmdDelWithArgs(args, func() error {
-			return cmdDel(args)
-		})
-		Expect(err).NotTo(HaveOccurred())
-		return nil
-	})
-	Expect(err).NotTo(HaveOccurred())
-
-	// Make sure ipvlan link has been deleted
-	err = targetNs.Do(func(ns.NetNS) error {
-		defer GinkgoRecover()
-
-		link, err := netlink.LinkByName(IFNAME)
-		Expect(err).To(HaveOccurred())
-		Expect(link).To(BeNil())
-		return nil
-	})
-	Expect(err).NotTo(HaveOccurred())
-}
-
 var _ = Describe("ipvlan Operations", func() {
 	var originalNS ns.NetNS
 
 	BeforeEach(func() {
 		// Create a new NetNS so we don't modify the host
 		var err error
-		originalNS, err = testutils.NewNS()
+		originalNS, err = ns.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 
 		err = originalNS.Do(func(ns.NetNS) error {
@@ -149,7 +76,7 @@ var _ = Describe("ipvlan Operations", func() {
 		}
 
 		// Create ipvlan in other namespace
-		targetNs, err := testutils.NewNS()
+		targetNs, err := ns.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 		defer targetNs.Close()
 
@@ -189,35 +116,76 @@ var _ = Describe("ipvlan Operations", func() {
     }
 }`, MASTER_NAME)
 
-		ipvlanAddDelTest(conf, IFNAME, originalNS)
-	})
+		targetNs, err := ns.NewNS()
+		Expect(err).NotTo(HaveOccurred())
+		defer targetNs.Close()
 
-	It("configures and deconfigures an iplvan link with ADD/DEL when chained", func() {
-		const IFNAME = "ipvl0"
+		args := &skel.CmdArgs{
+			ContainerID: "dummy",
+			Netns:       targetNs.Path(),
+			IfName:      IFNAME,
+			StdinData:   []byte(conf),
+		}
 
-		conf := fmt.Sprintf(`{
-    "cniVersion": "0.3.1",
-    "name": "mynet",
-    "type": "ipvlan",
-    "prevResult": {
-            "interfaces": [
-                    {
-                            "name": "%s"
-                    }
-            ],
-            "ips": [
-                    {
-                            "version": "4",
-                            "address": "10.1.2.2/24",
-                            "gateway": "10.1.2.1",
-                            "interface": 0
-                    }
-            ],
-            "routes": []
-    }
-}`, MASTER_NAME)
+		var result *current.Result
+		err = originalNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
 
-		ipvlanAddDelTest(conf, IFNAME, originalNS)
+			r, _, err := testutils.CmdAddWithResult(targetNs.Path(), IFNAME, []byte(conf), func() error {
+				return cmdAdd(args)
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			result, err = current.GetResult(r)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(len(result.Interfaces)).To(Equal(1))
+			Expect(result.Interfaces[0].Name).To(Equal(IFNAME))
+			Expect(len(result.IPs)).To(Equal(1))
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make sure ipvlan link exists in the target namespace
+		err = targetNs.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			link, err := netlink.LinkByName(IFNAME)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(link.Attrs().Name).To(Equal(IFNAME))
+
+			hwaddr, err := net.ParseMAC(result.Interfaces[0].Mac)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(link.Attrs().HardwareAddr).To(Equal(hwaddr))
+
+			addrs, err := netlink.AddrList(link, syscall.AF_INET)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(addrs)).To(Equal(1))
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		err = originalNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			err = testutils.CmdDelWithResult(targetNs.Path(), IFNAME, func() error {
+				return cmdDel(args)
+			})
+			Expect(err).NotTo(HaveOccurred())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make sure ipvlan link has been deleted
+		err = targetNs.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			link, err := netlink.LinkByName(IFNAME)
+			Expect(err).To(HaveOccurred())
+			Expect(link).To(BeNil())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("deconfigures an unconfigured ipvlan link with DEL", func() {
@@ -234,7 +202,7 @@ var _ = Describe("ipvlan Operations", func() {
     }
 }`, MASTER_NAME)
 
-		targetNs, err := testutils.NewNS()
+		targetNs, err := ns.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 		defer targetNs.Close()
 
@@ -248,7 +216,7 @@ var _ = Describe("ipvlan Operations", func() {
 		err = originalNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			err = testutils.CmdDelWithArgs(args, func() error {
+			err = testutils.CmdDelWithResult(targetNs.Path(), IFNAME, func() error {
 				return cmdDel(args)
 			})
 			Expect(err).NotTo(HaveOccurred())

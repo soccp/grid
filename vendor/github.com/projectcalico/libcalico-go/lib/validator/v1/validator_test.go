@@ -404,12 +404,6 @@ func init() {
 			},
 			true,
 		),
-		Entry("should accept HostEndpoint with Name *",
-			model.HostEndpoint{
-				Name: "*",
-			},
-			true,
-		),
 
 		// (API) HostEndpointSpec.
 		Entry("should accept HostEndpointSpec with a port (m)",

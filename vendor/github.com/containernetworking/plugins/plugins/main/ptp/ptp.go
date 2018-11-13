@@ -49,7 +49,7 @@ type NetConf struct {
 
 func setupContainerVeth(netns ns.NetNS, ifName string, mtu int, pr *current.Result) (*current.Interface, *current.Interface, error) {
 	// The IPAM result will be something like IP=192.168.3.5/24, GW=192.168.3.1.
-	// What we want is really a point-to-point link but veth does not support IFF_POINTTOPOINT.
+	// What we want is really a point-to-point link but veth does not support IFF_POINTOPONT.
 	// Next best thing would be to let it ARP but set interface to 192.168.3.5/32 and
 	// add a route like "192.168.3.0/24 via 192.168.3.1 dev $ifName".
 	// Unfortunately that won't work as the GW will be outside the interface's subnet.
@@ -259,10 +259,10 @@ func cmdDel(args *skel.CmdArgs) error {
 	// There is a netns so try to clean up. Delete can be called multiple times
 	// so don't return an error if the device is already removed.
 	// If the device isn't there then don't try to clean up IP masq either.
-	var ipnets []*net.IPNet
+	var ipn *net.IPNet
 	err := ns.WithNetNSPath(args.Netns, func(_ ns.NetNS) error {
 		var err error
-		ipnets, err = ip.DelLinkByNameAddr(args.IfName)
+		ipn, err = ip.DelLinkByNameAddr(args.IfName, netlink.FAMILY_V4)
 		if err != nil && err == ip.ErrLinkNotFound {
 			return nil
 		}
@@ -273,23 +273,15 @@ func cmdDel(args *skel.CmdArgs) error {
 		return err
 	}
 
-	if len(ipnets) != 0 && conf.IPMasq {
+	if ipn != nil && conf.IPMasq {
 		chain := utils.FormatChainName(conf.Name, args.ContainerID)
 		comment := utils.FormatComment(conf.Name, args.ContainerID)
-		for _, ipn := range ipnets {
-			err = ip.TeardownIPMasq(ipn, chain, comment)
-		}
+		err = ip.TeardownIPMasq(ipn, chain, comment)
 	}
 
 	return err
 }
 
 func main() {
-	// TODO: implement plugin version
-	skel.PluginMain(cmdAdd, cmdGet, cmdDel, version.All, "TODO")
-}
-
-func cmdGet(args *skel.CmdArgs) error {
-	// TODO: implement
-	return fmt.Errorf("not implemented")
+	skel.PluginMain(cmdAdd, cmdDel, version.All)
 }

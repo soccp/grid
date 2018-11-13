@@ -42,7 +42,6 @@ const (
 
 type NetConf struct {
 	types.NetConf
-
 	SubnetFile string                 `json:"subnetFile"`
 	DataDir    string                 `json:"dataDir"`
 	Delegate   map[string]interface{} `json:"delegate"`
@@ -160,7 +159,7 @@ func delegateAdd(cid, dataDir string, netconf map[string]interface{}) error {
 		return err
 	}
 
-	result, err := invoke.DelegateAdd(netconf["type"].(string), netconfBytes, nil)
+	result, err := invoke.DelegateAdd(netconf["type"].(string), netconfBytes)
 	if err != nil {
 		return err
 	}
@@ -203,7 +202,43 @@ func cmdAdd(args *skel.CmdArgs) error {
 		}
 	}
 
-	return doCmdAdd(args, n, fenv)
+	n.Delegate["name"] = n.Name
+
+	if !hasKey(n.Delegate, "type") {
+		n.Delegate["type"] = "bridge"
+	}
+
+	if !hasKey(n.Delegate, "ipMasq") {
+		// if flannel is not doing ipmasq, we should
+		ipmasq := !*fenv.ipmasq
+		n.Delegate["ipMasq"] = ipmasq
+	}
+
+	if !hasKey(n.Delegate, "mtu") {
+		mtu := fenv.mtu
+		n.Delegate["mtu"] = mtu
+	}
+
+	if n.Delegate["type"].(string) == "bridge" {
+		if !hasKey(n.Delegate, "isGateway") {
+			n.Delegate["isGateway"] = true
+		}
+	}
+	if n.CNIVersion != "" {
+		n.Delegate["cniVersion"] = n.CNIVersion
+	}
+
+	n.Delegate["ipam"] = map[string]interface{}{
+		"type":   "host-local",
+		"subnet": fenv.sn.String(),
+		"routes": []types.Route{
+			types.Route{
+				Dst: *fenv.nw,
+			},
+		},
+	}
+
+	return delegateAdd(args.ContainerID, n.DataDir, n.Delegate)
 }
 
 func cmdDel(args *skel.CmdArgs) error {
@@ -212,14 +247,23 @@ func cmdDel(args *skel.CmdArgs) error {
 		return err
 	}
 
-	return doCmdDel(args, nc)
+	netconfBytes, err := consumeScratchNetConf(args.ContainerID, nc.DataDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Per spec should ignore error if resources are missing / already removed
+			return nil
+		}
+		return err
+	}
+
+	n := &types.NetConf{}
+	if err = json.Unmarshal(netconfBytes, n); err != nil {
+		return fmt.Errorf("failed to parse netconf: %v", err)
+	}
+
+	return invoke.DelegateDel(n.Type, netconfBytes)
 }
 
 func main() {
-	skel.PluginMain(cmdAdd, cmdGet, cmdDel, version.All, "TODO")
-}
-
-func cmdGet(args *skel.CmdArgs) error {
-	// TODO: implement
-	return fmt.Errorf("not implemented")
+	skel.PluginMain(cmdAdd, cmdDel, version.All)
 }

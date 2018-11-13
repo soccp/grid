@@ -21,7 +21,7 @@ import (
 	"regexp"
 	"strings"
 
-	"gopkg.in/go-playground/validator.v8"
+	validator "gopkg.in/go-playground/validator.v8"
 
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -72,6 +72,8 @@ var (
 	dropAcceptReturnRegex = regexp.MustCompile("^(Drop|Accept|Return)$")
 	acceptReturnRegex     = regexp.MustCompile("^(Accept|Return)$")
 	reasonString          = "Reason: "
+	poolSmallIPv4         = "IP pool size is too small (min /26) for use with Calico IPAM"
+	poolSmallIPv6         = "IP pool size is too small (min /122) for use with Calico IPAM"
 	poolUnstictCIDR       = "IP pool CIDR is not strictly masked"
 	overlapsV4LinkLocal   = "IP pool range overlaps with IPv4 Link Local range 169.254.0.0/16"
 	overlapsV6LinkLocal   = "IP pool range overlaps with IPv6 Link Local range fe80::/10"
@@ -177,7 +179,6 @@ func init() {
 	registerStructValidator(validatorSecondary, validateWorkloadEndpointSpec, api.WorkloadEndpointSpec{})
 	registerStructValidator(validatorSecondary, validateHostEndpointSpec, api.HostEndpointSpec{})
 	registerStructValidator(validatorSecondary, validateRule, api.Rule{})
-	registerStructValidator(validatorSecondary, validateBGPPeerSpec, api.BGPPeerSpec{})
 
 	// Register structs that have two level of additional structs to validate.
 	registerStructValidator(validatorTertiary, validateNetworkPolicy, api.NetworkPolicy{})
@@ -227,7 +228,7 @@ func validateAction(v *validator.Validate, topStruct reflect.Value, currentStruc
 func validateInterface(v *validator.Validate, topStruct reflect.Value, currentStructOrField reflect.Value, field reflect.Value, fieldType reflect.Type, fieldKind reflect.Kind, param string) bool {
 	s := field.String()
 	log.Debugf("Validate interface: %s", s)
-	return s == "*" || interfaceRegex.MatchString(s)
+	return interfaceRegex.MatchString(s)
 }
 
 func validateDatastoreType(v *validator.Validate, topStruct reflect.Value, currentStructOrField reflect.Value, field reflect.Value, fieldType reflect.Type, fieldKind reflect.Kind, param string) bool {
@@ -466,7 +467,7 @@ func validateHTTPPaths(paths []api.HTTPPath) error {
 
 func validateHTTPRule(v *validator.Validate, structLevel *validator.StructLevel) {
 	h := structLevel.CurrentStruct.Interface().(api.HTTPMatch)
-	log.Debugf("Validate HTTP Rule: %v", h)
+	log.Debug("Validate HTTP Rule: %v", h)
 	if err := validateHTTPMethods(h.Methods); err != nil {
 		structLevel.ReportError(reflect.ValueOf(h.Methods), "Methods", "", reason(err.Error()))
 	}
@@ -678,23 +679,19 @@ func validateIPPoolSpec(v *validator.Validate, structLevel *validator.StructLeve
 			"IPpool.IPIPMode", "", reason("IPIPMode other than 'Never' is not supported on an IPv6 IP pool"))
 	}
 
-	// Default the blockSize
-	if pool.BlockSize == 0 {
-		if ipAddr.Version() == 4 {
-			pool.BlockSize = 26
-		} else {
-			pool.BlockSize = 122
-		}
-	}
-
 	// The Calico IPAM places restrictions on the minimum IP pool size.  If
 	// the ippool is enabled, check that the pool is at least the minimum size.
 	if !pool.Disabled {
-		ones, _ := cidr.Mask.Size()
-		log.Debugf("Pool CIDR: %s, mask: %d, blockSize: %d", cidr.String(), ones, pool.BlockSize)
-		if ones > pool.BlockSize {
-			structLevel.ReportError(reflect.ValueOf(pool.CIDR),
-				"IPpool.CIDR", "", reason("IP pool size is too small for use with Calico IPAM. It must be equal to or greater than the block size."))
+		ones, bits := cidr.Mask.Size()
+		log.Debugf("Pool CIDR: %s, num bits: %d", cidr.String(), bits-ones)
+		if bits-ones < 6 {
+			if cidr.Version() == 4 {
+				structLevel.ReportError(reflect.ValueOf(pool.CIDR),
+					"IPpool.CIDR", "", reason(poolSmallIPv4))
+			} else {
+				structLevel.ReportError(reflect.ValueOf(pool.CIDR),
+					"IPpool.CIDR", "", reason(poolSmallIPv6))
+			}
 		}
 	}
 
@@ -828,23 +825,6 @@ func validateNodeSpec(v *validator.Validate, structLevel *validator.StructLevel)
 			structLevel.ReportError(reflect.ValueOf(ns.BGP), "BGP", "",
 				reason("Spec.BGP should not be empty"))
 		}
-	}
-}
-
-func validateBGPPeerSpec(v *validator.Validate, structLevel *validator.StructLevel) {
-	ps := structLevel.CurrentStruct.Interface().(api.BGPPeerSpec)
-
-	if ps.Node != "" && ps.NodeSelector != "" {
-		structLevel.ReportError(reflect.ValueOf(ps.Node), "Node", "",
-			reason("Node field must be empty when NodeSelector is specified"))
-	}
-	if ps.PeerIP != "" && ps.PeerSelector != "" {
-		structLevel.ReportError(reflect.ValueOf(ps.PeerIP), "PeerIP", "",
-			reason("PeerIP field must be empty when PeerSelector is specified"))
-	}
-	if uint32(ps.ASNumber) != 0 && ps.PeerSelector != "" {
-		structLevel.ReportError(reflect.ValueOf(ps.ASNumber), "ASNumber", "",
-			reason("ASNumber field must be empty when PeerSelector is specified"))
 	}
 }
 
@@ -1093,6 +1073,12 @@ func validateObjectMetaLabels(v *validator.Validate, structLevel *validator.Stru
 func ruleUsesAppLayerPolicy(rule *api.Rule) (bool, reflect.Value, string) {
 	if rule.HTTP != nil {
 		return true, reflect.ValueOf(rule.HTTP), "HTTP"
+	}
+	if rule.Source.ServiceAccounts != nil {
+		return true, reflect.ValueOf(rule.Source.ServiceAccounts), "Source.ServiceAccounts"
+	}
+	if rule.Destination.ServiceAccounts != nil {
+		return true, reflect.ValueOf(rule.Destination.ServiceAccounts), "Destination.ServiceAccounts"
 	}
 	return false, reflect.Value{}, ""
 }

@@ -3,12 +3,12 @@ sudo: required
 dist: trusty
 
 go:
-  - 1.9.x
-  - 1.10.x
+  - 1.7.x
+  - 1.8.x
 
 env:
   global:
-  - PATH=$GOROOT/bin:$GOPATH/bin:$PATH
+  - PATH=$GOROOT/bin:$PATH
   matrix:
   - TARGET=amd64
   - TARGET=arm
@@ -18,11 +18,6 @@ env:
 
 matrix:
   fast_finish: true
-
-install:
-  - sudo apt-get install gcc-multilib gcc-mingw-w64 -y
-  - go get github.com/onsi/ginkgo/ginkgo
-  - go get github.com/containernetworking/cni/cnitool
 
 script:
  - |

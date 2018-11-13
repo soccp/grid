@@ -1,4 +1,4 @@
-// Copyright 2015-2018 CNI authors
+// Copyright 2015 CNI authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,7 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
-	"os"
 	"strings"
 
 	"github.com/containernetworking/cni/pkg/skel"
@@ -27,6 +25,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
+	"github.com/containernetworking/plugins/pkg/utils/hwaddr"
 
 	"github.com/vishvananda/netlink"
 
@@ -85,9 +84,6 @@ const (
     "ipam": {
         "type":    "host-local"`
 
-	ipamDataDirStr = `,
-        "dataDir": "%s"`
-
 	// Single subnet configuration (legacy)
 	subnetConfStr = `,
         "subnet":  "%s"`
@@ -115,13 +111,10 @@ const (
 
 // netConfJSON() generates a JSON network configuration string
 // for a test case.
-func (tc testCase) netConfJSON(dataDir string) string {
+func (tc testCase) netConfJSON() string {
 	conf := fmt.Sprintf(netConfStr, tc.cniVersion, BRNAME)
 	if tc.subnet != "" || tc.ranges != nil {
 		conf += ipamStartStr
-		if dataDir != "" {
-			conf += fmt.Sprintf(ipamDataDirStr, dataDir)
-		}
 		if tc.subnet != "" {
 			conf += tc.subnetConfig()
 		}
@@ -156,15 +149,12 @@ func (tc testCase) rangesConfig() string {
 	return conf + rangesEndStr
 }
 
-var counter uint
-
 // createCmdArgs generates network configuration and creates command
 // arguments for a test case.
-func (tc testCase) createCmdArgs(targetNS ns.NetNS, dataDir string) *skel.CmdArgs {
-	conf := tc.netConfJSON(dataDir)
-	defer func() { counter += 1 }()
+func (tc testCase) createCmdArgs(targetNS ns.NetNS) *skel.CmdArgs {
+	conf := tc.netConfJSON()
 	return &skel.CmdArgs{
-		ContainerID: fmt.Sprintf("dummy-%d", counter),
+		ContainerID: "dummy",
 		Netns:       targetNS.Path(),
 		IfName:      IFNAME,
 		StdinData:   []byte(conf),
@@ -221,27 +211,9 @@ func ipVersion(ip net.IP) string {
 	return "6"
 }
 
-func countIPAMIPs(path string) (int, error) {
-	count := 0
-	files, err := ioutil.ReadDir(path)
-	if err != nil {
-		return -1, err
-	}
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-
-		if net.ParseIP(file.Name()) != nil {
-			count++
-		}
-	}
-	return count, nil
-}
-
 type cmdAddDelTester interface {
 	setNS(testNS ns.NetNS, targetNS ns.NetNS)
-	cmdAddTest(tc testCase, dataDir string)
+	cmdAddTest(tc testCase)
 	cmdDelTest(tc testCase)
 }
 
@@ -266,16 +238,16 @@ func (tester *testerV03x) setNS(testNS ns.NetNS, targetNS ns.NetNS) {
 	tester.targetNS = targetNS
 }
 
-func (tester *testerV03x) cmdAddTest(tc testCase, dataDir string) {
+func (tester *testerV03x) cmdAddTest(tc testCase) {
 	// Generate network config and command arguments
-	tester.args = tc.createCmdArgs(tester.targetNS, dataDir)
+	tester.args = tc.createCmdArgs(tester.targetNS)
 
 	// Execute cmdADD on the plugin
 	var result *current.Result
 	err := tester.testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		r, raw, err := testutils.CmdAddWithArgs(tester.args, func() error {
+		r, raw, err := testutils.CmdAddWithResult(tester.targetNS.Path(), IFNAME, tester.args.StdinData, func() error {
 			return cmdAdd(tester.args)
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -286,14 +258,7 @@ func (tester *testerV03x) cmdAddTest(tc testCase, dataDir string) {
 
 		Expect(len(result.Interfaces)).To(Equal(3))
 		Expect(result.Interfaces[0].Name).To(Equal(BRNAME))
-		Expect(result.Interfaces[0].Mac).To(HaveLen(17))
-
-		Expect(result.Interfaces[1].Name).To(HavePrefix("veth"))
-		Expect(result.Interfaces[1].Mac).To(HaveLen(17))
-
 		Expect(result.Interfaces[2].Name).To(Equal(IFNAME))
-		Expect(result.Interfaces[2].Mac).To(HaveLen(17)) //mac is random
-		Expect(result.Interfaces[2].Sandbox).To(Equal(tester.targetNS.Path()))
 
 		// Make sure bridge link exists
 		link, err := netlink.LinkByName(result.Interfaces[0].Name)
@@ -301,7 +266,6 @@ func (tester *testerV03x) cmdAddTest(tc testCase, dataDir string) {
 		Expect(link.Attrs().Name).To(Equal(BRNAME))
 		Expect(link).To(BeAssignableToTypeOf(&netlink.Bridge{}))
 		Expect(link.Attrs().HardwareAddr.String()).To(Equal(result.Interfaces[0].Mac))
-		bridgeMAC := link.Attrs().HardwareAddr.String()
 
 		// Ensure bridge has expected gateway address(es)
 		addrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
@@ -310,6 +274,10 @@ func (tester *testerV03x) cmdAddTest(tc testCase, dataDir string) {
 		for _, cidr := range tc.expGWCIDRs {
 			ip, subnet, err := net.ParseCIDR(cidr)
 			Expect(err).NotTo(HaveOccurred())
+			if ip.To4() != nil {
+				hwAddr := fmt.Sprintf("%s", link.Attrs().HardwareAddr)
+				Expect(hwAddr).To(HavePrefix(hwaddr.PrivateMACPrefixString))
+			}
 
 			found := false
 			subnetPrefix, subnetBits := subnet.Mask.Size()
@@ -332,12 +300,6 @@ func (tester *testerV03x) cmdAddTest(tc testCase, dataDir string) {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(link).To(BeAssignableToTypeOf(&netlink.Veth{}))
 		tester.vethName = result.Interfaces[1].Name
-
-		// Check that the bridge has a different mac from the veth
-		// If not, it means the bridge has an unstable mac and will change
-		// as ifs are added and removed
-		Expect(link.Attrs().HardwareAddr.String()).NotTo(Equal(bridgeMAC))
-
 		return nil
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -352,11 +314,14 @@ func (tester *testerV03x) cmdAddTest(tc testCase, dataDir string) {
 		Expect(link).To(BeAssignableToTypeOf(&netlink.Veth{}))
 
 		expCIDRsV4, expCIDRsV6 := tc.expectedCIDRs()
+		if expCIDRsV4 != nil {
+			hwAddr := fmt.Sprintf("%s", link.Attrs().HardwareAddr)
+			Expect(hwAddr).To(HavePrefix(hwaddr.PrivateMACPrefixString))
+		}
 		addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(len(addrs)).To(Equal(len(expCIDRsV4)))
 		addrs, err = netlink.AddrList(link, netlink.FAMILY_V6)
-		Expect(len(addrs)).To(Equal(len(expCIDRsV6) + 1)) //add one for the link-local
 		Expect(err).NotTo(HaveOccurred())
 		// Ignore link local address which may or may not be
 		// ready when we read addresses.
@@ -403,7 +368,7 @@ func (tester *testerV03x) cmdDelTest(tc testCase) {
 	err := tester.testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		err := testutils.CmdDelWithArgs(tester.args, func() error {
+		err := testutils.CmdDelWithResult(tester.targetNS.Path(), IFNAME, func() error {
 			return cmdDel(tester.args)
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -431,7 +396,6 @@ func (tester *testerV03x) cmdDelTest(tc testCase) {
 		Expect(link).To(BeNil())
 		return nil
 	})
-	Expect(err).NotTo(HaveOccurred())
 }
 
 type testerV01xOr02x struct {
@@ -446,22 +410,23 @@ func (tester *testerV01xOr02x) setNS(testNS ns.NetNS, targetNS ns.NetNS) {
 	tester.targetNS = targetNS
 }
 
-func (tester *testerV01xOr02x) cmdAddTest(tc testCase, dataDir string) {
+func (tester *testerV01xOr02x) cmdAddTest(tc testCase) {
 	// Generate network config and calculate gateway addresses
-	tester.args = tc.createCmdArgs(tester.targetNS, dataDir)
+	tester.args = tc.createCmdArgs(tester.targetNS)
 
 	// Execute cmdADD on the plugin
+	var result *types020.Result
 	err := tester.testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		r, raw, err := testutils.CmdAddWithArgs(tester.args, func() error {
+		r, raw, err := testutils.CmdAddWithResult(tester.targetNS.Path(), IFNAME, tester.args.StdinData, func() error {
 			return cmdAdd(tester.args)
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(strings.Index(string(raw), "\"ip\":")).Should(BeNumerically(">", 0))
 
 		// We expect a version 0.1.0 result
-		_, err = types020.GetResult(r)
+		result, err = types020.GetResult(r)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Make sure bridge link exists
@@ -477,6 +442,10 @@ func (tester *testerV01xOr02x) cmdAddTest(tc testCase, dataDir string) {
 		for _, cidr := range tc.expGWCIDRs {
 			ip, subnet, err := net.ParseCIDR(cidr)
 			Expect(err).NotTo(HaveOccurred())
+			if ip.To4() != nil {
+				hwAddr := fmt.Sprintf("%s", link.Attrs().HardwareAddr)
+				Expect(hwAddr).To(HavePrefix(hwaddr.PrivateMACPrefixString))
+			}
 
 			found := false
 			subnetPrefix, subnetBits := subnet.Mask.Size()
@@ -510,6 +479,10 @@ func (tester *testerV01xOr02x) cmdAddTest(tc testCase, dataDir string) {
 		Expect(link).To(BeAssignableToTypeOf(&netlink.Veth{}))
 
 		expCIDRsV4, expCIDRsV6 := tc.expectedCIDRs()
+		if expCIDRsV4 != nil {
+			hwAddr := fmt.Sprintf("%s", link.Attrs().HardwareAddr)
+			Expect(hwAddr).To(HavePrefix(hwaddr.PrivateMACPrefixString))
+		}
 		addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(len(addrs)).To(Equal(len(expCIDRsV4)))
@@ -543,7 +516,7 @@ func (tester *testerV01xOr02x) cmdDelTest(tc testCase) {
 	err := tester.testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		err := testutils.CmdDelWithArgs(tester.args, func() error {
+		err := testutils.CmdDelWithResult(tester.targetNS.Path(), IFNAME, func() error {
 			return cmdDel(tester.args)
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -564,17 +537,17 @@ func (tester *testerV01xOr02x) cmdDelTest(tc testCase) {
 	Expect(err).NotTo(HaveOccurred())
 }
 
-func cmdAddDelTest(testNS ns.NetNS, tc testCase, dataDir string) {
+func cmdAddDelTest(testNS ns.NetNS, tc testCase) {
 	// Get a Add/Del tester based on test case version
 	tester := testerByVersion(tc.cniVersion)
 
-	targetNS, err := testutils.NewNS()
+	targetNS, err := ns.NewNS()
 	Expect(err).NotTo(HaveOccurred())
 	defer targetNS.Close()
 	tester.setNS(testNS, targetNS)
 
 	// Test IP allocation
-	tester.cmdAddTest(tc, dataDir)
+	tester.cmdAddTest(tc)
 
 	// Test IP Release
 	tester.cmdDelTest(tc)
@@ -585,23 +558,15 @@ func cmdAddDelTest(testNS ns.NetNS, tc testCase, dataDir string) {
 
 var _ = Describe("bridge Operations", func() {
 	var originalNS ns.NetNS
-	var dataDir string
 
 	BeforeEach(func() {
 		// Create a new NetNS so we don't modify the host
 		var err error
-		originalNS, err = testutils.NewNS()
+		originalNS, err = ns.NewNS()
 		Expect(err).NotTo(HaveOccurred())
-
-		dataDir, err = ioutil.TempDir("", "bridge_test")
-		Expect(err).NotTo(HaveOccurred())
-
-		// Do not emulate an error, each test will set this if needed
-		debugPostIPAMError = nil
 	})
 
 	AfterEach(func() {
-		Expect(os.RemoveAll(dataDir)).To(Succeed())
 		Expect(originalNS.Close()).To(Succeed())
 	})
 
@@ -696,7 +661,7 @@ var _ = Describe("bridge Operations", func() {
 		}
 		for _, tc := range testCases {
 			tc.cniVersion = "0.3.0"
-			cmdAddDelTest(originalNS, tc, dataDir)
+			cmdAddDelTest(originalNS, tc)
 		}
 	})
 
@@ -726,7 +691,7 @@ var _ = Describe("bridge Operations", func() {
 		}
 		for _, tc := range testCases {
 			tc.cniVersion = "0.3.1"
-			cmdAddDelTest(originalNS, tc, dataDir)
+			cmdAddDelTest(originalNS, tc)
 		}
 	})
 
@@ -738,11 +703,11 @@ var _ = Describe("bridge Operations", func() {
 		}
 
 		tester := testerV03x{}
-		targetNS, err := testutils.NewNS()
+		targetNS, err := ns.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 		defer targetNS.Close()
 		tester.setNS(originalNS, targetNS)
-		tester.args = tc.createCmdArgs(targetNS, dataDir)
+		tester.args = tc.createCmdArgs(targetNS)
 
 		// Execute cmdDEL on the plugin, expect no errors
 		tester.cmdDelTest(tc)
@@ -774,7 +739,7 @@ var _ = Describe("bridge Operations", func() {
 		}
 		for _, tc := range testCases {
 			tc.cniVersion = "0.1.0"
-			cmdAddDelTest(originalNS, tc, dataDir)
+			cmdAddDelTest(originalNS, tc)
 		}
 	})
 
@@ -923,64 +888,6 @@ var _ = Describe("bridge Operations", func() {
 
 			Expect(link.Attrs().Promisc).To(Equal(1))
 
-			return nil
-		})
-		Expect(err).NotTo(HaveOccurred())
-	})
-	It("creates a bridge with a stable MAC addresses", func() {
-		testCases := []testCase{
-			{
-				subnet: "10.1.2.0/24",
-			},
-			{
-				subnet: "2001:db8:42::/64",
-			},
-		}
-
-		for _, tc := range testCases {
-			tc.cniVersion = "0.3.1"
-			_, _, err := setupBridge(tc.netConf())
-			Expect(err).NotTo(HaveOccurred())
-			link, err := netlink.LinkByName(BRNAME)
-			Expect(err).NotTo(HaveOccurred())
-			origMac := link.Attrs().HardwareAddr
-
-			cmdAddDelTest(originalNS, tc, dataDir)
-
-			link, err = netlink.LinkByName(BRNAME)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(link.Attrs().HardwareAddr).To(Equal(origMac))
-		}
-	})
-
-	It("checks ip release in case of error", func() {
-		err := originalNS.Do(func(ns.NetNS) error {
-			defer GinkgoRecover()
-			tc := testCase{
-				cniVersion: "0.3.1",
-				subnet:     "10.1.2.0/24",
-			}
-
-			_, _, err := setupBridge(tc.netConf())
-			Expect(err).NotTo(HaveOccurred())
-
-			args := tc.createCmdArgs(originalNS, dataDir)
-
-			// get number of allocated IPs before asking for a new one
-			before, err := countIPAMIPs(dataDir)
-			Expect(err).NotTo(HaveOccurred())
-
-			debugPostIPAMError = fmt.Errorf("debugPostIPAMError")
-			_, _, err = testutils.CmdAddWithArgs(args, func() error {
-				return cmdAdd(args)
-			})
-			Expect(err).To(MatchError("debugPostIPAMError"))
-
-			// get number of allocated IPs after failure
-			after, err := countIPAMIPs(dataDir)
-			Expect(err).NotTo(HaveOccurred())
-
-			Expect(before).To(Equal(after))
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())

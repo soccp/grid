@@ -15,28 +15,18 @@
 package disk
 
 import (
-	"github.com/alexflint/go-filemutex"
 	"os"
-	"path"
+	"syscall"
 )
 
 // FileLock wraps os.File to be used as a lock using flock
 type FileLock struct {
-	f *filemutex.FileMutex
+	f *os.File
 }
 
 // NewFileLock opens file/dir at path and returns unlocked FileLock object
-func NewFileLock(lockPath string) (*FileLock, error) {
-	fi, err := os.Stat(lockPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if fi.IsDir() {
-		lockPath = path.Join(lockPath, "lock")
-	}
-
-	f, err := filemutex.New(lockPath)
+func NewFileLock(path string) (*FileLock, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -44,16 +34,17 @@ func NewFileLock(lockPath string) (*FileLock, error) {
 	return &FileLock{f}, nil
 }
 
+// Close closes underlying file
 func (l *FileLock) Close() error {
 	return l.f.Close()
 }
 
 // Lock acquires an exclusive lock
 func (l *FileLock) Lock() error {
-	return l.f.Lock()
+	return syscall.Flock(int(l.f.Fd()), syscall.LOCK_EX)
 }
 
 // Unlock releases the lock
 func (l *FileLock) Unlock() error {
-	return l.f.Unlock()
+	return syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
 }

@@ -23,5 +23,5 @@ import (
 
 func TestAllocator(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "plugins/ipam/host-local/backend/allocator")
+	RunSpecs(t, "Allocator Suite")
 }

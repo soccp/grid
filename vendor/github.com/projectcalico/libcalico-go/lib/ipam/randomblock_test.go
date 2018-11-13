@@ -21,59 +21,54 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
-	"github.com/projectcalico/libcalico-go/lib/apis/v3"
+
+	cnet "github.com/projectcalico/libcalico-go/lib/net"
 )
 
 var _ = Describe("Random Block Generator", func() {
 
 	DescribeTable("Test random block generator with different CIDRs",
-		func(cidr string, blockSize int) {
-			poolTest(cidr, blockSize)
+		func(cidr string) {
+			poolTest(cidr)
 		},
 
-		Entry("IPv4 CIDR - default block size", "10.10.0.0/24", 26),
-		Entry("IPv6 CIDR - default block size", "fd80:24e2:f998:72d6::/120", 122),
-		Entry("IPv4 CIDR - maximum block size", "10.10.0.0/16", 20),
-		Entry("IPv6 CIDR - maximum block size", "fd80:24e2:f998:72d6::/114", 116),
-		Entry("IPv4 CIDR - minimum block size", "10.10.0.0/24", 32),
-		Entry("IPv6 CIDR - minimum block size", "fd80:24e2:f998:72d6::/120", 128),
+		Entry("IPv4 CIDR", "10.10.0.0/24"),
+		Entry("IPv6 CIDR", "fd80:24e2:f998:72d6::/120"),
 	)
 })
 
-func poolTest(cidr string, blockSize int) {
-	pools := []v3.IPPool{{Spec: v3.IPPoolSpec{CIDR: cidr, BlockSize: blockSize}}}
+func poolTest(cidr string) {
+	_, subnet, err := net.ParseCIDR(cidr)
+	Expect(err).NotTo(HaveOccurred())
+	var pools []cnet.IPNet
+	pools = []cnet.IPNet{{*subnet}}
 	host := "testHost"
 
-	_, pool, err := net.ParseCIDR(cidr)
-	Expect(err).NotTo(HaveOccurred())
+	for _, pool := range pools {
 
-	ones, size := pool.Mask.Size()
-	prefixLen := size - ones
-	numIP := new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(prefixLen)), nil)
-	blocks := randomBlockGenerator(pools[0], host)
+		ones, size := pool.Mask.Size()
+		prefixLen := size - ones
+		numIP := new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(prefixLen)), nil)
+		blocks := randomBlockGenerator(pool, host)
 
-	var numAddresses *big.Int
+		blockCount := big.NewInt(0)
+		for blk := blocks(); blk != nil; blk = blocks() {
 
-	blockCount := big.NewInt(0)
-	for blk := blocks(); blk != nil; blk = blocks() {
-		blockCount.Add(blockCount, big.NewInt(1))
-		ip, sn, err := net.ParseCIDR(blk.String())
-		Expect(err).NotTo(HaveOccurred())
+			blockCount.Add(blockCount, big.NewInt(1))
+			ip, sn, err := net.ParseCIDR(blk.String())
+			Expect(err).NotTo(HaveOccurred())
 
-		for ip := ip.Mask(sn.Mask); sn.Contains(ip); increment(ip) {
-			Expect(pool.Contains(ip)).To(BeTrue())
+			By(fmt.Sprintf("Getting block and checking IP is within block: %s\n", blk.String()))
+			for ip := ip.Mask(sn.Mask); sn.Contains(ip); increment(ip) {
+				Expect(pool.Contains(ip)).To(BeTrue())
+			}
 		}
 
-		// Store off the number of addresses - this will only record the value for the last block but that's fine.
-		ones, size := blk.Mask.Size()
-		numAddresses = new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(size-ones)), nil)
+		By(fmt.Sprintf("Checkig the block count has the correct number of blocka"))
+		numBlocks := new(big.Int)
+		numBlocks.Div(numIP, big.NewInt(blockSize))
+		Expect(blockCount).To(Equal(numBlocks))
 	}
-
-	By(fmt.Sprintf("Checking the block count has the correct number of blocks"))
-
-	numBlocks := new(big.Int)
-	numBlocks.Div(numIP, numAddresses)
-	Expect(blockCount).To(Equal(numBlocks))
 }
 
 func increment(ip net.IP) {

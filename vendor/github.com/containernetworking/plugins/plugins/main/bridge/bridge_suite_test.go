@@ -23,5 +23,5 @@ import (
 
 func TestBridge(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "plugins/main/bridge")
+	RunSpecs(t, "bridge Suite")
 }

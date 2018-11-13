@@ -35,7 +35,7 @@ var _ = Describe("ptp Operations", func() {
 	BeforeEach(func() {
 		// Create a new NetNS so we don't modify the host
 		var err error
-		originalNS, err = testutils.NewNS()
+		originalNS, err = ns.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -46,7 +46,7 @@ var _ = Describe("ptp Operations", func() {
 	doTest := func(conf string, numIPs int) {
 		const IFNAME = "ptp0"
 
-		targetNs, err := testutils.NewNS()
+		targetNs, err := ns.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 		defer targetNs.Close()
 
@@ -64,7 +64,7 @@ var _ = Describe("ptp Operations", func() {
 		err = originalNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			resI, _, err = testutils.CmdAddWithArgs(args, func() error {
+			resI, _, err = testutils.CmdAddWithResult(targetNs.Path(), IFNAME, []byte(conf), func() error {
 				return cmdAdd(args)
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -78,14 +78,12 @@ var _ = Describe("ptp Operations", func() {
 		// Make sure ptp link exists in the target namespace
 		// Then, ping the gateway
 		seenIPs := 0
-
-		wantMac := ""
 		err = targetNs.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
 			link, err := netlink.LinkByName(IFNAME)
 			Expect(err).NotTo(HaveOccurred())
-			wantMac = link.Attrs().HardwareAddr.String()
+			Expect(link.Attrs().Name).To(Equal(IFNAME))
 
 			for _, ipc := range res.IPs {
 				if *ipc.Interface != 1 {
@@ -107,22 +105,11 @@ var _ = Describe("ptp Operations", func() {
 
 		Expect(seenIPs).To(Equal(numIPs))
 
-		// make sure the interfaces are correct
-		Expect(res.Interfaces).To(HaveLen(2))
-
-		Expect(res.Interfaces[0].Name).To(HavePrefix("veth"))
-		Expect(res.Interfaces[0].Mac).To(HaveLen(17))
-		Expect(res.Interfaces[0].Sandbox).To(BeEmpty())
-
-		Expect(res.Interfaces[1].Name).To(Equal(IFNAME))
-		Expect(res.Interfaces[1].Mac).To(Equal(wantMac))
-		Expect(res.Interfaces[1].Sandbox).To(Equal(targetNs.Path()))
-
 		// Call the plugins with the DEL command, deleting the veth endpoints
 		err = originalNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			err := testutils.CmdDelWithArgs(args, func() error {
+			err := testutils.CmdDelWithResult(targetNs.Path(), IFNAME, func() error {
 				return cmdDel(args)
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -192,7 +179,7 @@ var _ = Describe("ptp Operations", func() {
     }
 }`
 
-		targetNs, err := testutils.NewNS()
+		targetNs, err := ns.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 		defer targetNs.Close()
 
@@ -207,7 +194,7 @@ var _ = Describe("ptp Operations", func() {
 		err = originalNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			err := testutils.CmdDelWithArgs(args, func() error {
+			err := testutils.CmdDelWithResult(targetNs.Path(), IFNAME, func() error {
 				return cmdDel(args)
 			})
 			Expect(err).NotTo(HaveOccurred())

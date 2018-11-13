@@ -14,10 +14,14 @@
 package utils
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/containernetworking/cni/pkg/skel"
@@ -143,8 +147,16 @@ func DoNetworking(
 
 		// Do the per-IP version set-up.  Add gateway routes etc.
 		if hasIPv4 {
+			//zk
 			// Add a connected route to a dummy next hop so that a default route can be set
-			gw := net.IPv4(169, 254, 1, 1)
+			gateway := GetGateway()
+			g := strings.Split(gateway, ".")
+			first, _ := strconv.Atoi(g[0])
+			second, _ := strconv.Atoi(g[1])
+			third, _ := strconv.Atoi(g[2])
+			four, _ := strconv.Atoi(g[3])
+			//gw := net.IPv4(169, 254, 1, 1)
+			gw := net.IPv4(byte(first), byte(second), byte(third), byte(four))
 			gwNet := &net.IPNet{IP: gw, Mask: net.CIDRMask(32, 32)}
 			err := netlink.RouteAdd(
 				&netlink.Route{
@@ -415,4 +427,31 @@ func writeProcSys(path, value string) error {
 		err = err1
 	}
 	return err
+}
+
+//zk use brctl shell command bring hostveth connect to bridge
+
+func Brctl(hostvethName string) error {
+	cmd := exec.Command("brctl", "addif", "br0", hostvethName)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// zk Get GateWay
+func GetGateway() string {
+	command := "ip route |grep default |awk '{print $3}'"
+	cmd := exec.Command("/bin/sh", "-c", command)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return ""
+	}
+	v := strings.TrimSpace(out.String())
+	return v
 }

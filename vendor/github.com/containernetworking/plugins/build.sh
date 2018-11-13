@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -e
-cd $(dirname "$0")
 
 if [ "$(uname)" == "Darwin" ]; then
-	export GOOS="${GOOS:-linux}"
+	export GOOS=linux
 fi
 
 ORG_PATH="github.com/containernetworking"
@@ -14,25 +13,23 @@ if [ ! -h gopath/src/${REPO_PATH} ]; then
 	ln -s ../../../.. gopath/src/${REPO_PATH} || exit 255
 fi
 
+export GO15VENDOREXPERIMENT=1
 export GOPATH=${PWD}/gopath
-export GO="${GO:-go}"
 
 mkdir -p "${PWD}/bin"
 
-echo "Building plugins ${GOOS}"
+echo "Building plugins"
 PLUGINS="plugins/meta/* plugins/main/* plugins/ipam/* plugins/sample"
 for d in $PLUGINS; do
 	if [ -d "$d" ]; then
 		plugin="$(basename "$d")"
-		if [ $plugin == "windows" ]
+		echo "  $plugin"
+		# use go install so we don't duplicate work
+		if [ -n "$FASTBUILD" ]
 		then
-			if [ "$GOARCH" == "amd64" ]
-			then
-				GOOS=windows . $d/build.sh
-			fi
+			GOBIN=${PWD}/bin go install -pkgdir $GOPATH/pkg "$@" $REPO_PATH/$d
 		else
-			echo "  $plugin"
-		        $GO build -o "${PWD}/bin/$plugin" "$@" "$REPO_PATH"/$d
+			go build -o "${PWD}/bin/$plugin" -pkgdir "$GOPATH/pkg" "$@" "$REPO_PATH/$d"
 		fi
 	fi
 done

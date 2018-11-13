@@ -21,6 +21,7 @@ import (
 
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -142,26 +143,60 @@ type poolAccessor struct {
 	client *client
 }
 
-func (p poolAccessor) GetEnabledPools(ipVersion int) ([]v3.IPPool, error) {
+func (p poolAccessor) GetEnabledPools(ipVersion int, hostname string) ([]net.IPNet, string, error) {
 	pools, err := p.client.IPPools().List(context.Background(), options.ListOptions{})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	log.Debugf("Got list of all IPPools: %v", pools)
-	var enabled []v3.IPPool
+	enabled := []net.IPNet{}
 	for _, pool := range pools.Items {
 		if pool.Spec.Disabled {
 			continue
 		} else if _, cidr, err := net.ParseCIDR(pool.Spec.CIDR); err == nil && cidr.Version() == ipVersion {
-			log.Debugf("Adding pool (%s) to the enabled IPPool list", cidr.String())
-			enabled = append(enabled, pool)
+			log.Debugf("test pool (%s) name is (%s)", cidr.String(), pool.ObjectMeta.Name)
+			if matchPool(hostname, pool.ObjectMeta.Name) {
+				log.Debugf("Adding pool (%s) to the enabled IPPool list", cidr.String())
+				enabled = append(enabled, *cidr)
+				return enabled, pool.ObjectMeta.Name, nil
+			} else {
+				log.Debugf("Ignoring IPPool: %s. does not match host: %s", pool.Spec.CIDR, hostname)
+			}
 		} else if err != nil {
 			log.Warnf("Failed to parse the IPPool: %s. Ignoring that IPPool", pool.Spec.CIDR)
 		} else {
 			log.Debugf("Ignoring IPPool: %s. IP version is different.", pool.Spec.CIDR)
 		}
 	}
-	return enabled, nil
+	return enabled, "", nil
+}
+
+//zk this function is use for match ippool
+func matchPool(host, value string) bool {
+	h := strings.Split(host, ".")
+	hostprefix := h[0] + "." + h[1] + "." + h[2]
+	v := strings.Split(value, "_")
+	prefix := v[0]
+	if hostprefix != prefix {
+		return false
+	}
+	suffix := v[1]
+	min, err := strconv.Atoi(strings.Split(suffix, "-")[0])
+	if err != nil {
+		return false
+	}
+	max, err := strconv.Atoi(strings.Split(suffix, "-")[1])
+	if err != nil {
+		return false
+	}
+	last, err := strconv.Atoi(h[3])
+	if err != nil {
+		return false
+	}
+	if last >= min && last <= max {
+		return true
+	}
+	return false
 }
 
 // EnsureInitialized is used to ensure the backend datastore is correctly

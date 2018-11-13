@@ -39,7 +39,7 @@ var _ = Describe("macvlan Operations", func() {
 	BeforeEach(func() {
 		// Create a new NetNS so we don't modify the host
 		var err error
-		originalNS, err = testutils.NewNS()
+		originalNS, err = ns.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 
 		err = originalNS.Do(func(ns.NetNS) error {
@@ -75,7 +75,7 @@ var _ = Describe("macvlan Operations", func() {
 			MTU:    1500,
 		}
 
-		targetNs, err := testutils.NewNS()
+		targetNs, err := ns.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 		defer targetNs.Close()
 
@@ -114,7 +114,7 @@ var _ = Describe("macvlan Operations", func() {
     }
 }`, MASTER_NAME)
 
-		targetNs, err := testutils.NewNS()
+		targetNs, err := ns.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 		defer targetNs.Close()
 
@@ -129,7 +129,7 @@ var _ = Describe("macvlan Operations", func() {
 		err = originalNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			r, _, err := testutils.CmdAddWithArgs(args, func() error {
+			r, _, err := testutils.CmdAddWithResult(targetNs.Path(), IFNAME, []byte(conf), func() error {
 				return cmdAdd(args)
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -166,7 +166,7 @@ var _ = Describe("macvlan Operations", func() {
 		err = originalNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			err := testutils.CmdDelWithArgs(args, func() error {
+			err := testutils.CmdDelWithResult(targetNs.Path(), IFNAME, func() error {
 				return cmdDel(args)
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -200,7 +200,7 @@ var _ = Describe("macvlan Operations", func() {
     }
 }`, MASTER_NAME)
 
-		targetNs, err := testutils.NewNS()
+		targetNs, err := ns.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 		defer targetNs.Close()
 
@@ -214,7 +214,7 @@ var _ = Describe("macvlan Operations", func() {
 		err = originalNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			err := testutils.CmdDelWithArgs(args, func() error {
+			err := testutils.CmdDelWithResult(targetNs.Path(), IFNAME, func() error {
 				return cmdDel(args)
 			})
 			Expect(err).NotTo(HaveOccurred())

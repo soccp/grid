@@ -23,5 +23,5 @@ import (
 
 func TestHwaddr(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "pkg/utils/hwaddr")
+	RunSpecs(t, "Hwaddr Suite")
 }

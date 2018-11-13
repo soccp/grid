@@ -25,14 +25,12 @@ import (
 type chain struct {
 	table       string
 	name        string
+	entryRule   []string // the rule that enters this chain
 	entryChains []string // the chains to add the entry rule
-
-	entryRules [][]string // the rules that "point" to this chain
-	rules      [][]string // the rules this chain contains
 }
 
 // setup idempotently creates the chain. It will not error if the chain exists.
-func (c *chain) setup(ipt *iptables.IPTables) error {
+func (c *chain) setup(ipt *iptables.IPTables, rules [][]string) error {
 	// create the chain
 	exists, err := chainExists(ipt, c.table, c.name)
 	if err != nil {
@@ -45,21 +43,17 @@ func (c *chain) setup(ipt *iptables.IPTables) error {
 	}
 
 	// Add the rules to the chain
-	for i := len(c.rules) - 1; i >= 0; i-- {
-		if err := prependUnique(ipt, c.table, c.name, c.rules[i]); err != nil {
+	for i := len(rules) - 1; i >= 0; i-- {
+		if err := prependUnique(ipt, c.table, c.name, rules[i]); err != nil {
 			return err
 		}
 	}
 
-	// Add the entry rules to the entry chains
+	// Add the entry rules
+	entryRule := append(c.entryRule, "-j", c.name)
 	for _, entryChain := range c.entryChains {
-		for i := len(c.entryRules) - 1; i >= 0; i-- {
-			r := []string{}
-			r = append(r, c.entryRules[i]...)
-			r = append(r, "-j", c.name)
-			if err := prependUnique(ipt, c.table, entryChain, r); err != nil {
-				return err
-			}
+		if err := prependUnique(ipt, c.table, entryChain, entryRule); err != nil {
+			return err
 		}
 	}
 
@@ -78,7 +72,7 @@ func (c *chain) teardown(ipt *iptables.IPTables) error {
 
 	for _, entryChain := range c.entryChains {
 		entryChainRules, err := ipt.List(c.table, entryChain)
-		if err != nil || len(entryChainRules) < 1 {
+		if err != nil {
 			// Swallow error here - probably the chain doesn't exist.
 			// If we miss something the deletion will fail
 			continue

@@ -13,10 +13,10 @@
 // limitations under the License.
 package ipam
 
-import "github.com/projectcalico/libcalico-go/lib/apis/v3"
+import cnet "github.com/projectcalico/libcalico-go/lib/net"
 
 // Interface used to access the enabled IPPools.
 type PoolAccessorInterface interface {
 	// Returns a list of enabled pools sorted in alphanumeric name order.
-	GetEnabledPools(ipVersion int) ([]v3.IPPool, error)
+	GetEnabledPools(ipVersion int, hostname string) ([]cnet.IPNet, string, error)
 }

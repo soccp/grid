@@ -1,22 +1,17 @@
-[![Linux Build Status](https://travis-ci.org/containernetworking/plugins.svg?branch=master)](https://travis-ci.org/containernetworking/plugins)
-[![Windows Build Status](https://ci.appveyor.com/api/projects/status/kcuubx0chr76ev86/branch/master?svg=true)](https://ci.appveyor.com/project/cni-bot/plugins/branch/master)
+[![Build Status](https://travis-ci.org/containernetworking/plugins.svg?branch=master)](https://travis-ci.org/containernetworking/plugins)
 
 # plugins
 Some CNI network plugins, maintained by the containernetworking team. For more information, see the individual READMEs.
 
-Read [CONTRIBUTING](CONTRIBUTING.md) for build and test instructions.
-
 ## Plugins supplied:
 ### Main: interface-creating
 * `bridge`: Creates a bridge, adds the host and the container to it.
-* `ipvlan`: Adds an [ipvlan](https://www.kernel.org/doc/Documentation/networking/ipvlan.txt) interface in the container.
-* `loopback`: Set the state of loopback interface to up.
-* `macvlan`: Creates a new MAC address, forwards all traffic to that to the container.
+* `ipvlan`: Adds an [ipvlan](https://www.kernel.org/doc/Documentation/networking/ipvlan.txt) interface in the container
+* `loopback`: Creates a loopback interface
+* `macvlan`: Creates a new MAC address, forwards all traffic to that to the container
 * `ptp`: Creates a veth pair.
 * `vlan`: Allocates a vlan device.
-#### Windows: windows specific
-* `win-bridge`: Creates a bridge, adds the host and the container to it.
-* `win-overlay`: Creates an overlay interface to the container.
+
 ### IPAM: IP address allocation
 * `dhcp`: Runs a daemon on the host to make DHCP requests on behalf of the container
 * `host-local`: maintains a local database of allocated IPs
