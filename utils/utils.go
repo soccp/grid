@@ -68,7 +68,7 @@ func DetermineNodename(conf types.NetConf) string {
 		nodename = conf.Nodename
 	}
 	logrus.Debugf("Using node name %s", nodename)
-	return nodename
+	return strings.Replace(nodename, "\n", "", -1)
 }
 
 // nodenameFromFile reads the /var/lib/calico/nodename file if it exists and
@@ -84,7 +84,7 @@ func nodenameFromFile() string {
 		logrus.WithError(err).Error("Failed to read /var/lib/calico/nodename")
 		return ""
 	}
-	return string(data)
+	return strings.Replace(string(data), "\n", "", -1)
 }
 
 // CreateOrUpdate creates the WorkloadEndpoint if ResourceVersion is not specified,

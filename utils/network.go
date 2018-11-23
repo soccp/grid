@@ -20,9 +20,11 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"strconv"
+	//"strconv"
+	"math/rand"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types/current"
@@ -55,6 +57,21 @@ func init() {
 		IPv4AllNet,
 		IPv6AllNet, // Only used if we end up adding a v6 address.
 	}
+}
+
+//zk
+func NewRandomMac() net.HardwareAddr {
+	m := make(net.HardwareAddr, 6)
+
+	rand.Seed(time.Now().UnixNano())
+	for i := 0; i < 6; i++ {
+		mac_byte := rand.Intn(256)
+		m[i] = byte(mac_byte)
+
+		rand.Seed(int64(mac_byte))
+	}
+
+	return m
 }
 
 // DoNetworking performs the networking for the given config and IPAM result
@@ -107,7 +124,7 @@ func DoNetworking(
 			return err
 		}
 
-		if mac, err := net.ParseMAC("EE:EE:EE:EE:EE:EE"); err != nil {
+		/*if mac, err := net.ParseMAC("EE:EE:EE:EE:EE:EE"); err != nil {
 			logger.Infof("failed to parse MAC Address: %v. Using kernel generated MAC.", err)
 		} else {
 			// Set the MAC address on the host side interface so the kernel does not
@@ -115,6 +132,12 @@ func DoNetworking(
 			if err = netlink.LinkSetHardwareAddr(hostVeth, mac); err != nil {
 				logger.Warnf("failed to Set MAC of %q: %v. Using kernel generated MAC.", hostVethName, err)
 			}
+		}*/
+		//zk  Modify the logic to get the MAC for hostVeth
+
+		mac := NewRandomMac()
+		if err = netlink.LinkSetHardwareAddr(hostVeth, mac); err != nil {
+			logger.Warnf("failed to Set MAC of %q: %v. Using kernel generated MAC.", hostVethName, err)
 		}
 
 		// Explicitly set the veth to UP state, because netlink doesn't always do that on all the platforms with net.FlagUp.
@@ -146,17 +169,17 @@ func DoNetworking(
 		}
 
 		// Do the per-IP version set-up.  Add gateway routes etc.
-		if hasIPv4 {
+		/*if hasIPv4 {
 			//zk
 			// Add a connected route to a dummy next hop so that a default route can be set
-			gateway := GetGateway()
-			g := strings.Split(gateway, ".")
-			first, _ := strconv.Atoi(g[0])
-			second, _ := strconv.Atoi(g[1])
-			third, _ := strconv.Atoi(g[2])
-			four, _ := strconv.Atoi(g[3])
-			//gw := net.IPv4(169, 254, 1, 1)
-			gw := net.IPv4(byte(first), byte(second), byte(third), byte(four))
+			//gateway := GetGateway()
+			//g := strings.Split(gateway, ".")
+			//first, _ := strconv.Atoi(g[0])
+			//second, _ := strconv.Atoi(g[1])
+			//third, _ := strconv.Atoi(g[2])
+			//four, _ := strconv.Atoi(g[3])
+			gw := net.IPv4(172, 16, 30, 1)
+			//gw := net.IPv4(byte(first), byte(second), byte(third), byte(four))
 			gwNet := &net.IPNet{IP: gw, Mask: net.CIDRMask(32, 32)}
 			err := netlink.RouteAdd(
 				&netlink.Route{
@@ -180,64 +203,31 @@ func DoNetworking(
 					return fmt.Errorf("failed to add IPv4 route for %v via %v: %v", r, gw, err)
 				}
 			}
-		}
-
-		if hasIPv6 {
-			// Make sure ipv6 is enabled in the container/pod network namespace.
-			// Without these sysctls enabled, interfaces will come up but they won't get a link local IPv6 address
-			// which is required to add the default IPv6 route.
-			if err = writeProcSys("/proc/sys/net/ipv6/conf/all/disable_ipv6", "0"); err != nil {
-				return fmt.Errorf("failed to set net.ipv6.conf.all.disable_ipv6=0: %s", err)
-			}
-
-			if err = writeProcSys("/proc/sys/net/ipv6/conf/default/disable_ipv6", "0"); err != nil {
-				return fmt.Errorf("failed to set net.ipv6.conf.default.disable_ipv6=0: %s", err)
-			}
-
-			if err = writeProcSys("/proc/sys/net/ipv6/conf/lo/disable_ipv6", "0"); err != nil {
-				return fmt.Errorf("failed to set net.ipv6.conf.lo.disable_ipv6=0: %s", err)
-			}
-
-			// No need to add a dummy next hop route as the host veth device will already have an IPv6
-			// link local address that can be used as a next hop.
-			// Just fetch the address of the host end of the veth and use it as the next hop.
-			addresses, err := netlink.AddrList(hostVeth, netlink.FAMILY_V6)
-			if err != nil {
-				logger.Errorf("Error listing IPv6 addresses for the host side of the veth pair: %s", err)
-				return err
-			}
-
-			if len(addresses) < 1 {
-				// If the hostVeth doesn't have an IPv6 address then this host probably doesn't
-				// support IPv6. Since a IPv6 address has been allocated that can't be used,
-				// return an error.
-				return fmt.Errorf("failed to get IPv6 addresses for host side of the veth pair")
-			}
-
-			hostIPv6Addr := addresses[0].IP
-
-			for _, r := range routes {
-				if r.IP.To4() != nil {
-					logger.WithField("route", r).Debug("Skipping non-IPv6 route")
-					continue
-				}
-				logger.WithField("route", r).Debug("Adding IPv6 route")
-				if err = ip.AddRoute(r, hostIPv6Addr, contVeth); err != nil {
-					return fmt.Errorf("failed to add IPv6 route for %v via %v: %v", r, hostIPv6Addr, err)
-				}
-			}
-		}
+		}*/
 
 		// Now add the IPs to the container side of the veth.
 		for _, addr := range result.IPs {
-			if err = netlink.AddrAdd(contVeth, &netlink.Addr{IPNet: &addr.Address}); err != nil {
+			IpNet := &net.IPNet{IP: addr.Address.IP, Mask: net.CIDRMask(23, 32)}
+			//if err = netlink.AddrAdd(contVeth, &netlink.Addr{IPNet: &addr.Address}); err != nil {
+			if err = netlink.AddrAdd(contVeth, &netlink.Addr{IPNet: IpNet}); err != nil {
 				return fmt.Errorf("failed to add IP addr to %q: %v", contVeth, err)
+			}
+			for _, r := range routes {
+				if r.IP.To4() == nil {
+					logger.WithField("route", r).Debug("Skipping non-IPv4 route")
+					continue
+				}
+				logger.WithField("route", r).Debug("Adding IPv4 route")
+				gw := net.IPv4(192, 168, 12, 1)
+				if err = ip.AddRoute(r, gw, contVeth); err != nil {
+					return fmt.Errorf("failed to add IPv4 route for %v via %v: %v", r, gw, err)
+				}
 			}
 		}
 
-		if err = configureContainerSysctls(logger, conf.ContainerSettings, hasIPv4, hasIPv6); err != nil {
+		/*if err = configureContainerSysctls(logger, conf.ContainerSettings, hasIPv4, hasIPv6); err != nil {
 			return fmt.Errorf("error configuring sysctls for the container netns, error: %s", err)
-		}
+		}*/
 
 		// Now that the everything has been successfully set up in the container, move the "host" end of the
 		// veth into the host namespace.
@@ -253,10 +243,10 @@ func DoNetworking(
 		return "", "", err
 	}
 
-	err = configureSysctls(hostVethName, hasIPv4, hasIPv6)
+	/*err = configureSysctls(hostVethName, hasIPv4, hasIPv6)
 	if err != nil {
 		return "", "", fmt.Errorf("error configuring sysctls for interface: %s, error: %s", hostVethName, err)
-	}
+	}*/
 
 	// Moving a veth between namespaces always leaves it in the "DOWN" state. Set it back to "UP" now that we're
 	// back in the host namespace.
@@ -270,9 +260,15 @@ func DoNetworking(
 	}
 
 	// Now that the host side of the veth is moved, state set to UP, and configured with sysctls, we can add the routes to it in the host namespace.
-	err = SetupRoutes(hostVeth, result)
+	/*err = SetupRoutes(hostVeth, result)
 	if err != nil {
 		return "", "", fmt.Errorf("error adding host side routes for interface: %s, error: %s", hostVeth.Attrs().Name, err)
+	}*/
+	//zk
+
+	err = Brctl(hostVethName)
+	if err != nil {
+		return "", "", fmt.Errorf("ERROR add hostveth %s to br0, err: %s", hostVethName, err)
 	}
 
 	return hostVethName, contVethMAC, err
@@ -344,9 +340,9 @@ func configureSysctls(hostVethName string, hasIPv4, hasIPv6 bool) error {
 
 		// Normally, the kernel has a delay before responding to proxy ARP but we know
 		// that's not needed in a Calico network so we disable it.
-		if err = writeProcSys(fmt.Sprintf("/proc/sys/net/ipv4/neigh/%s/proxy_delay", hostVethName), "0"); err != nil {
+		/*if err = writeProcSys(fmt.Sprintf("/proc/sys/net/ipv4/neigh/%s/proxy_delay", hostVethName), "0"); err != nil {
 			return fmt.Errorf("failed to set net.ipv4.neigh.%s.proxy_delay=0: %s", hostVethName, err)
-		}
+		}*/
 
 		// Enable IP forwarding of packets coming _from_ this interface.  For packets to
 		// be forwarded in both directions we need this flag to be set on the fabric-facing

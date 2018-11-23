@@ -209,7 +209,7 @@ func (c ipamClient) determinePools(requestedPools []net.IPNet, version ipVersion
 	}
 	log.Debugf("enabled IPPools: %v", enabledPools)
 
-	if len(requestedPools) > 0 {
+	/*if len(requestedPools) > 0 {
 		log.Debugf("requested IPPools: %v", requestedPools)
 		// Build a map so we can lookup existing pools.
 		pm := map[string]bool{}
@@ -226,7 +226,7 @@ func (c ipamClient) determinePools(requestedPools []net.IPNet, version ipVersion
 		}
 
 		return requestedPools, poolname, nil
-	}
+	}*/
 
 	return enabledPools, poolname, nil
 }
