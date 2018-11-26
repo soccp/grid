@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	n "net"
 
 	log "github.com/sirupsen/logrus"
 
@@ -195,13 +196,42 @@ func (c ipamClient) getBlockFromAffinity(ctx context.Context, aff *model.KVPair)
 	return b, nil
 }
 
+func gethost() (string, error) {
+	addrs, err := n.InterfaceByName("br0")
+
+	if err != nil {
+		return "", fmt.Errorf("get br0 addrs failed %s", err)
+	}
+
+	address, err := addrs.Addrs()
+	if err != nil {
+		return "", fmt.Errorf("get br0 address failed %s", err)
+	}
+	add := address[0]
+	// 检查ip地址判断是否回环地址
+	if ipnet, ok := add.(*n.IPNet); ok && !ipnet.IP.IsLoopback() {
+		if ipnet.IP.To4() != nil {
+			//fmt.Println(ipnet.IP.String())
+			//fmt.Println(ipnet.Mask.String())
+			return ipnet.IP.String(), err
+		}
+
+	}
+	return "", fmt.Errorf("get %s netinfo failed %s", "br0")
+}
+
 // determinePools compares a list of requested pools with the enabled pools
 // and returns the intersect. If any requested pool does not exist, or is not enabled, an error is returned.
 // If no pools are requested, all enabled pools are returned.
-func (c ipamClient) determinePools(requestedPools []net.IPNet, version ipVersion, hostname string) ([]net.IPNet, string, error) {
+func (c ipamClient) determinePools(requestedPools []net.IPNet, version ipVersion) ([]net.IPNet, string, error) {
 	var enabledPools []net.IPNet
 	var poolname string
 	var err error
+	hostname, err := gethost()
+	if err != nil {
+		log.WithError(err).Errorf("Error reading configured pools")
+		return nil, poolname, err
+	}
 	enabledPools, poolname, err = c.pools.GetEnabledPools(version.Number, hostname)
 	if err != nil {
 		log.WithError(err).Errorf("Error reading configured pools")
@@ -233,7 +263,7 @@ func (c ipamClient) determinePools(requestedPools []net.IPNet, version ipVersion
 
 func (c ipamClient) autoAssign(ctx context.Context, num int, handleID *string, attrs map[string]string, requestedPools []net.IPNet, version ipVersion, host string) ([]net.IP, error) {
 	// Start by sanitizing the requestedPools.
-	pools, poolname, err := c.determinePools(requestedPools, version, host)
+	pools, poolname, err := c.determinePools(requestedPools, version)
 	if err != nil {
 		return nil, err
 	}

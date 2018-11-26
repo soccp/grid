@@ -17,12 +17,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"os"
 	"os/exec"
-	//"strconv"
-	"math/rand"
-	"strings"
+	//"regexp"
+	//"strings"
 	"syscall"
 	"time"
 
@@ -102,7 +102,14 @@ func DoNetworking(
 		}
 		logger.Infof("Cleaning old hostVeth: %v", hostVethName)
 	}
-
+	mask, err := GetLocalNetInfo()
+	if err != nil {
+		return "", "", err
+	}
+	gw, err := GetGateway()
+	if err != nil {
+		return "", "", err
+	}
 	err = ns.WithNetNSPath(args.Netns, func(hostNS ns.NetNS) error {
 		veth := &netlink.Veth{
 			LinkAttrs: netlink.LinkAttrs{
@@ -207,7 +214,12 @@ func DoNetworking(
 
 		// Now add the IPs to the container side of the veth.
 		for _, addr := range result.IPs {
-			IpNet := &net.IPNet{IP: addr.Address.IP, Mask: net.CIDRMask(23, 32)}
+			/*mask, err := GetLocalNetInfo()
+			if err != nil {
+				return err
+			}*/
+			//IpNet := &net.IPNet{IP: addr.Address.IP, Mask: net.CIDRMask(23, 32)}
+			IpNet := &net.IPNet{IP: addr.Address.IP, Mask: mask.Mask}
 			//if err = netlink.AddrAdd(contVeth, &netlink.Addr{IPNet: &addr.Address}); err != nil {
 			if err = netlink.AddrAdd(contVeth, &netlink.Addr{IPNet: IpNet}); err != nil {
 				return fmt.Errorf("failed to add IP addr to %q: %v", contVeth, err)
@@ -218,7 +230,11 @@ func DoNetworking(
 					continue
 				}
 				logger.WithField("route", r).Debug("Adding IPv4 route")
-				gw := net.IPv4(192, 168, 12, 1)
+				//gw := net.IPv4(192, 168, 12, 1)
+				/*gw, err := GetGateway()
+				if err != nil {
+					return err
+				}*/
 				if err = ip.AddRoute(r, gw, contVeth); err != nil {
 					return fmt.Errorf("failed to add IPv4 route for %v via %v: %v", r, gw, err)
 				}
@@ -265,8 +281,12 @@ func DoNetworking(
 		return "", "", fmt.Errorf("error adding host side routes for interface: %s, error: %s", hostVeth.Attrs().Name, err)
 	}*/
 	//zk
-
-	err = Brctl(hostVethName)
+	br0link, err := netlink.LinkByName("br0")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to lookup %s: %v", "br0", err)
+	}
+	err = netlink.LinkSetMasterByIndex(hostVeth, br0link.Attrs().Index)
+	//err = Brctl(hostVethName)
 	if err != nil {
 		return "", "", fmt.Errorf("ERROR add hostveth %s to br0, err: %s", hostVethName, err)
 	}
@@ -439,15 +459,60 @@ func Brctl(hostvethName string) error {
 }
 
 // zk Get GateWay
-func GetGateway() string {
-	command := "ip route |grep default |awk '{print $3}'"
+func GetLocalNetInfo() (ipnet *net.IPNet, err error) {
+	addrs, err := net.InterfaceByName("br0")
+
+	if err != nil {
+		return nil, fmt.Errorf("get br0 addrs failed %s", err)
+	}
+
+	address, err := addrs.Addrs()
+	if err != nil {
+		return nil, fmt.Errorf("get br0 address failed %s", err)
+	}
+	add := address[0]
+	// 检查ip地址判断是否回环地址
+	if ipnet, ok := add.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+		if ipnet.IP.To4() != nil {
+			//fmt.Println(ipnet.IP.String())
+			//fmt.Println(ipnet.Mask.String())
+			return ipnet, err
+		}
+
+	}
+	return nil, fmt.Errorf("get %s netinfo failed %s", "br0")
+}
+
+/*func GetLocalGateway() (gateway net.IP, err error) {
+	command := "ip route |grep \"default via\" | grep \"br0\" |awk '{print $3}'"
 	cmd := exec.Command("/bin/sh", "-c", command)
 	var out bytes.Buffer
 	cmd.Stdout = &out
-	err := cmd.Run()
+	err = cmd.Run()
 	if err != nil {
-		return ""
+		return nil, fmt.Errorf("run command %s err", command)
 	}
 	v := strings.TrimSpace(out.String())
-	return v
+	matched, err := regexp.MatchString(`((2[0-4]\d|25[0-5]|[01]?\d\d?)\.){3}(2[0-4]\d|25[0-5]|[01]?\d\d?)`, "")
+	if err != nil {
+		return nil, fmt.Errorf("regexp run command output failed errinfo is %s", err)
+	}
+	if !matched {
+		return nil, fmt.Errorf("regexp result is %s", v)
+	}
+	gateway = net.ParseIP(v)
+	return gateway.To4(), nil
+}*/
+
+func GetGateway() (gateway net.IP, err error) {
+	hostveth, _ := netlink.LinkByName("br0")
+	routes, err := netlink.RouteList(hostveth, netlink.FAMILY_ALL)
+	if err != nil {
+		return nil, fmt.Errorf("error listing routes")
+	}
+	if routes[0].LinkIndex == hostveth.Attrs().Index {
+		return routes[0].Gw, nil
+	}
+	return nil, fmt.Errorf("error get br0 default gateway")
+
 }
