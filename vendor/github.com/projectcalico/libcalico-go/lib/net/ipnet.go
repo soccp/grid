@@ -67,6 +67,30 @@ func (i *IPNet) Network() *IPNet {
 	return n
 }
 
+//zk
+func GetCIDR(c string) (*IPNet, *IPNet, error) {
+	netIP, netIPNet, e := net.ParseCIDR(c)
+	if netIPNet == nil || e != nil {
+		return nil, nil, e
+	}
+
+	ip := &IP{netIP}
+	IpNet := &net.IPNet{IP: netIP, Mask: netIPNet.Mask}
+	ipcidr := &IPNet{*IpNet}
+	ipnet := &IPNet{*netIPNet}
+
+	// The base golang net library always uses a 4-byte IPv4 address in an
+	// IPv4 IPNet, so for uniformity in the returned types, make sure the
+	// IP address is also 4-bytes - this allows the user to safely assume
+	// all IP addresses returned by this function use the same encoding
+	// mechanism (not strictly required but better for testing and debugging).
+	if ip4 := ip.IP.To4(); ip4 != nil {
+		ip.IP = ip4
+	}
+
+	return ipcidr, ipnet, nil
+}
+
 func ParseCIDR(c string) (*IP, *IPNet, error) {
 	netIP, netIPNet, e := net.ParseCIDR(c)
 	if netIPNet == nil || e != nil {

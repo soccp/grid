@@ -42,7 +42,7 @@ type ipPoolAccessor struct {
 	pools map[string]bool
 }
 
-func (i *ipPoolAccessor) GetEnabledPools(ipVersion int, hostname string) ([]cnet.IPNet, error) {
+func (i *ipPoolAccessor) GetEnabledPools(ipVersion int) ([]cnet.IPNet, error) {
 	sorted := []string{}
 	// Get a sorted list of enabled pool CIDR strings.
 	for p, e := range i.pools {

@@ -21,10 +21,6 @@ import (
 
 	"encoding/hex"
 	"fmt"
-	"strconv"
-	"strings"
-	"time"
-
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	"github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/backend"
@@ -35,6 +31,9 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/options"
 	"github.com/projectcalico/libcalico-go/lib/set"
 	"github.com/satori/go.uuid"
+	//"strconv"
+	"strings"
+	"time"
 )
 
 // client implements the client.Interface.
@@ -143,24 +142,29 @@ type poolAccessor struct {
 	client *client
 }
 
-func (p poolAccessor) GetEnabledPools(ipVersion int, hostname string) ([]net.IPNet, string, error) {
+func (p poolAccessor) GetEnabledPools(ipVersion int, hostcidr string) ([]net.IPNet, error) {
 	pools, err := p.client.IPPools().List(context.Background(), options.ListOptions{})
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	log.Debugf("Got list of all IPPools: %v", pools)
 	enabled := []net.IPNet{}
 	for _, pool := range pools.Items {
 		if pool.Spec.Disabled {
 			continue
-		} else if _, cidr, err := net.ParseCIDR(pool.Spec.CIDR); err == nil && cidr.Version() == ipVersion {
+		} else if ip, cidr, err := net.GetCIDR(pool.Spec.CIDR); err == nil && cidr.Version() == ipVersion {
 			log.Debugf("test pool (%s) name is (%s)", cidr.String(), pool.ObjectMeta.Name)
-			if matchPool(hostname, pool.ObjectMeta.Name) {
-				log.Debugf("Adding pool (%s) to the enabled IPPool list", cidr.String())
-				enabled = append(enabled, *cidr)
-				return enabled, pool.ObjectMeta.Name, nil
+			//if matchPool(hostname, pool.ObjectMeta.Name) {
+			if cidr.String() == hostcidr {
+				log.Debugf("Adding pool (%s) to the enabled IPPool list", pool.Spec.CIDR)
+				//enabled = append(enabled, *cidr)
+				//IpNet := &net.IPNet{net.IP: ip, netMask: cidr.Mask}
+
+				//IpNet := &n.IPNet{IP: ip, Mask: cidr.Mask}
+				//ipnet := &net.IPNet{*IpNet}
+				enabled = append(enabled, *ip)
 			} else {
-				log.Debugf("Ignoring IPPool: %s. does not match host: %s", pool.Spec.CIDR, hostname)
+				log.Debugf("Ignoring IPPool: %s. does not match host: %s", pool.Spec.CIDR, hostcidr)
 			}
 		} else if err != nil {
 			log.Warnf("Failed to parse the IPPool: %s. Ignoring that IPPool", pool.Spec.CIDR)
@@ -168,11 +172,11 @@ func (p poolAccessor) GetEnabledPools(ipVersion int, hostname string) ([]net.IPN
 			log.Debugf("Ignoring IPPool: %s. IP version is different.", pool.Spec.CIDR)
 		}
 	}
-	return enabled, "", nil
+	return enabled, nil
 }
 
 //zk this function is use for match ippool
-func matchPool(host, value string) bool {
+/*func matchPool(host, value string) bool {
 	h := strings.Split(host, ".")
 	hostprefix := h[0] + "." + h[1] + "." + h[2]
 	v := strings.Split(value, "_")
@@ -197,7 +201,7 @@ func matchPool(host, value string) bool {
 		return true
 	}
 	return false
-}
+}*/
 
 // EnsureInitialized is used to ensure the backend datastore is correctly
 // initialized for use by Calico.  This method may be called multiple times, and

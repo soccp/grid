@@ -20,6 +20,8 @@ import (
 	"math/big"
 	"net"
 	"reflect"
+	"strconv"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 
@@ -58,19 +60,27 @@ type allocationBlock struct {
 	*model.AllocationBlock
 }
 
-func newBlock(cidr cnet.IPNet) allocationBlock {
+func newBlock(cidr cnet.IPNet) (allocationBlock, error) {
 	b := model.AllocationBlock{}
-	b.Allocations = make([]*int, blockSize)
-	b.Unallocated = make([]int, blockSize)
+	//zk Gets the last bit of IP
+	i := strings.Split(cidr.String(), "/")[0]
+	s, err := strconv.Atoi(strings.Split(i, ".")[3])
+	if err != nil {
+		return allocationBlock{&b}, fmt.Errorf("parse string to int err in function newBlock")
+	}
+	//zk Get the available length
+	blocksize := (254 - s + 1)
+	b.Allocations = make([]*int, blocksize)
+	b.Unallocated = make([]int, blocksize)
 	b.StrictAffinity = false
 	b.CIDR = cidr
 
 	// Initialize unallocated ordinals.
-	for i := 0; i < blockSize; i++ {
+	for i := 0; i < blocksize; i++ {
 		b.Unallocated[i] = i
 	}
 
-	return allocationBlock{&b}
+	return allocationBlock{&b}, nil
 }
 
 func (b *allocationBlock) autoAssign(

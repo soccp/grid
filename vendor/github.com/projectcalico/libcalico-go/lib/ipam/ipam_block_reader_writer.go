@@ -88,7 +88,7 @@ func (rw blockReaderWriter) findUnclaimedBlock(ctx context.Context, host string,
 		// Use a block generator to iterate through all of the blocks
 		// that fall within the pool.
 		log.Debugf("Looking for blocks in pool %+v", pool)
-		subnet := pools[0]
+		subnet := pool
 		log.Debugf("Getting block: %s", subnet.String())
 		key := model.BlockKey{CIDR: subnet}
 		_, err := rw.client.Get(ctx, key, "")
@@ -165,11 +165,15 @@ func (rw blockReaderWriter) claimAffineBlock(ctx context.Context, aff *model.KVP
 	// Pull out relevant fields.
 	subnet := aff.Key.(model.BlockAffinityKey).CIDR
 	host := aff.Key.(model.BlockAffinityKey).Host
-	logCtx := log.WithFields(log.Fields{"host": host, "subnet": subnet})
+	logCtx := log.WithFields(log.Fields{"cidr": host, "subnet": subnet})
 
 	// Create the new block.
-	affinityKeyStr := "host:" + host
-	block := newBlock(subnet)
+	affinityKeyStr := "cidr:" + host
+	logCtx.Infof("subnet is %s", subnet)
+	block, err := newBlock(subnet)
+	if err != nil {
+		return nil, err
+	}
 	block.Affinity = &affinityKeyStr
 	block.StrictAffinity = config.StrictAffinity
 
@@ -340,8 +344,8 @@ func (rw blockReaderWriter) releaseBlockAffinity(ctx context.Context, host strin
 
 // withinConfiguredPools returns true if the given IP is within a configured
 // Calico pool, and false otherwise.
-func (rw blockReaderWriter) withinConfiguredPools(ip cnet.IP, host string) bool {
-	enabledPools, _, _ := rw.pools.GetEnabledPools(ip.Version(), host)
+func (rw blockReaderWriter) withinConfiguredPools(ip cnet.IP, hostcidr string) bool {
+	enabledPools, _ := rw.pools.GetEnabledPools(ip.Version(), hostcidr)
 	for _, p := range enabledPools {
 		// Compare any enabled pools.
 		if p.Contains(ip.IP) {
