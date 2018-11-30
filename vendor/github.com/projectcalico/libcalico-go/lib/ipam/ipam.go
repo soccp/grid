@@ -479,7 +479,7 @@ func (c ipamClient) autoAssign(ctx context.Context, num int, handleID *string, a
 	// If we need to support non-strict affinity and no auto-allocation of
 	// blocks, then we should query the actual allocation blocks and assign
 	// from those.
-	rem := num - len(ips)
+	/*rem := num - len(ips)
 	if config.StrictAffinity != true && rem != 0 {
 		logCtx.Infof("Attempting to assign %d more addresses from non-affine blocks", rem)
 		// Figure out the pools to allocate from.
@@ -531,7 +531,7 @@ func (c ipamClient) autoAssign(ctx context.Context, num int, handleID *string, a
 				}
 			}
 		}
-	}
+	}*/
 
 	logCtx.Infof("Auto-assigned %d out of %d IPv%ds: %v", len(ips), num, version.Number, ips)
 	return ips, nil
@@ -942,6 +942,8 @@ func (c ipamClient) ReleasePoolAffinities(ctx context.Context, pool net.IPNet) e
 
 		for blockString, host := range pairs {
 			_, blockCIDR, _ := net.ParseCIDR(blockString)
+			//zk
+			//blockCIDR, _, _ := net.GetCIDR(blockString)
 			logCtx := log.WithField("cidr", blockCIDR)
 			for i := 0; i < ipamEtcdRetries; i++ {
 				err = c.blockReaderWriter.releaseBlockAffinity(ctx, host, *blockCIDR)
@@ -1085,9 +1087,9 @@ func (c ipamClient) ReleaseByHandle(ctx context.Context, handleID string) error 
 	handle := allocationHandle{obj.Value.(*model.IPAMHandle)}
 
 	for blockStr, _ := range handle.Block {
-		//_, blockCIDR, _ := net.ParseCIDR(blockStr)
+		_, blockCIDR, _ := net.ParseCIDR(blockStr)
 		//zk
-		blockCIDR, _, _ := net.GetCIDR(blockStr)
+		//blockCIDR, _, _ := net.GetCIDR(blockStr)
 		if err := c.releaseByHandle(ctx, handleID, *blockCIDR); err != nil {
 			return err
 		}

@@ -165,10 +165,10 @@ func (rw blockReaderWriter) claimAffineBlock(ctx context.Context, aff *model.KVP
 	// Pull out relevant fields.
 	subnet := aff.Key.(model.BlockAffinityKey).CIDR
 	host := aff.Key.(model.BlockAffinityKey).Host
-	logCtx := log.WithFields(log.Fields{"cidr": host, "subnet": subnet})
+	logCtx := log.WithFields(log.Fields{"host": host, "subnet": subnet})
 
 	// Create the new block.
-	affinityKeyStr := "cidr:" + host
+	affinityKeyStr := "host:" + host
 	logCtx.Infof("subnet is %s", subnet)
 	block, err := newBlock(subnet)
 	if err != nil {

@@ -166,7 +166,9 @@ func (b allocationBlock) numFreeAddresses() int {
 }
 
 func (b allocationBlock) empty() bool {
-	return b.numFreeAddresses() == blockSize
+	//zk
+	//return b.numFreeAddresses() == blockSize
+	return b.numFreeAddresses() == len(b.Allocations)
 }
 
 func (b *allocationBlock) release(addresses []cnet.IP) ([]cnet.IP, map[string]int, error) {
@@ -255,9 +257,10 @@ func (b *allocationBlock) deleteAttributes(delIndexes, ordinals []int) {
 		}
 	}
 	b.Attributes = newAttrs
-
+	//zk
 	// Update attribute indexes for all allocations in this block.
-	for i := 0; i < blockSize; i++ {
+	//for i := 0; i < blockSize; i++ {
+	for i := 0; i < len(b.Allocations); i++ {
 		if b.Allocations[i] != nil {
 			// Get the new index that corresponds to the old index
 			// and update the allocation.
@@ -306,7 +309,8 @@ func (b *allocationBlock) releaseByHandle(handleID string) int {
 	// There are addresses to release.
 	ordinals := []int{}
 	var o int
-	for o = 0; o < blockSize; o++ {
+	//for o = 0; o < blockSize; o++ {
+	for o = 0; o < len(b.Allocations); o++ {
 		// Only check allocated ordinals.
 		if b.Allocations[o] != nil && intInSlice(*b.Allocations[o], attrIndexes) {
 			// Release this ordinal.
@@ -329,7 +333,9 @@ func (b allocationBlock) ipsByHandle(handleID string) []cnet.IP {
 	ips := []cnet.IP{}
 	attrIndexes := b.attributeIndexesByHandle(handleID)
 	var o int
-	for o = 0; o < blockSize; o++ {
+	//zk
+	//for o = 0; o < blockSize; o++ {
+	for o = 0; o < len(b.Allocations); o++ {
 		if b.Allocations[o] != nil && intInSlice(*b.Allocations[o], attrIndexes) {
 			ip := ordinalToIP(o, b)
 			ips = append(ips, ip)
@@ -430,7 +436,9 @@ func ipToOrdinal(ip cnet.IP, b allocationBlock) (int, error) {
 	ip_int := ipToInt(ip)
 	base_int := ipToInt(cnet.IP{b.CIDR.IP})
 	ord := big.NewInt(0).Sub(ip_int, base_int).Int64()
-	if ord < 0 || ord >= blockSize {
+	//zk
+	//if ord < 0 || ord >= blockSize {
+	if ord < 0 || ord >= int64(len(b.Allocations)) {
 		return 0, fmt.Errorf("IP %s not in block %s", ip, b.CIDR)
 	}
 	return int(ord), nil
