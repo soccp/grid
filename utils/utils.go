@@ -346,14 +346,17 @@ func PopulateEndpointNets(wep *api.WorkloadEndpoint, result *current.Result) err
 	if len(result.IPs) == 0 {
 		return errors.New("IPAM plugin did not return any IP addresses")
 	}
-
+	//zk
+	mask, err := GetLocalNetInfo()
+	if err != nil {
+		return err
+	}
 	for _, ipNet := range result.IPs {
 		if ipNet.Version == "4" {
-			ipNet.Address.Mask = net.CIDRMask(32, 32)
+			ipNet.Address.Mask = mask.Mask
 		} else {
 			ipNet.Address.Mask = net.CIDRMask(128, 128)
 		}
-
 		wep.Spec.IPNetworks = append(wep.Spec.IPNetworks, ipNet.Address.String())
 	}
 

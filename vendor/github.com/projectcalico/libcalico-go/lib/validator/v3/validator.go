@@ -566,19 +566,20 @@ func validateWorkloadEndpointSpec(v *validator.Validate, structLevel *validator.
 	w := structLevel.CurrentStruct.Interface().(api.WorkloadEndpointSpec)
 
 	// The configured networks only support /32 (for IPv4) and /128 (for IPv6) at present.
-	for _, netw := range w.IPNetworks {
+	//zk Remove this restriction
+	/*for _, netw := range w.IPNetworks {
 		_, nw, err := cnet.ParseCIDROrIP(netw)
 		if err != nil {
 			structLevel.ReportError(reflect.ValueOf(netw),
 				"IPNetworks", "", reason("invalid CIDR"))
 		}
-
+		//zk Remove this restriction
 		ones, bits := nw.Mask.Size()
 		if bits != ones {
 			structLevel.ReportError(reflect.ValueOf(w.IPNetworks),
 				"IPNetworks", "", reason("IP network contains multiple addresses"))
 		}
-	}
+	}*/
 
 	_, v4gw, err := cnet.ParseCIDROrIP(w.IPv4Gateway)
 	if err != nil {

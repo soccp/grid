@@ -102,10 +102,10 @@ func DoNetworking(
 		}
 		logger.Infof("Cleaning old hostVeth: %v", hostVethName)
 	}
-	mask, err := GetLocalNetInfo()
+	/*mask, err := GetLocalNetInfo()
 	if err != nil {
 		return "", "", err
-	}
+	}*/
 	gw, err := GetGateway()
 	if err != nil {
 		return "", "", err
@@ -219,7 +219,9 @@ func DoNetworking(
 				return err
 			}*/
 			//IpNet := &net.IPNet{IP: addr.Address.IP, Mask: net.CIDRMask(23, 32)}
-			IpNet := &net.IPNet{IP: addr.Address.IP, Mask: mask.Mask}
+			//addr.Address.Mask = mask.Mask
+			IpNet := &net.IPNet{IP: addr.Address.IP, Mask: addr.Address.Mask}
+			//IpNet := &net.IPNet{IP: addr.Address.IP, Mask: mask.Mask}
 			//if err = netlink.AddrAdd(contVeth, &netlink.Addr{IPNet: &addr.Address}); err != nil {
 			if err = netlink.AddrAdd(contVeth, &netlink.Addr{IPNet: IpNet}); err != nil {
 				return fmt.Errorf("failed to add IP addr to %q: %v", contVeth, err)
