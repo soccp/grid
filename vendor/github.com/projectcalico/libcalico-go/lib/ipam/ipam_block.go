@@ -69,7 +69,7 @@ func newBlock(cidr cnet.IPNet) (allocationBlock, error) {
 		return allocationBlock{&b}, fmt.Errorf("parse string to int err in function newBlock")
 	}
 	//zk Get the available length
-	blocksize := (254 - s + 1)
+	blocksize := (253 - s + 1)
 	b.Allocations = make([]*int, blocksize)
 	b.Unallocated = make([]int, blocksize)
 	b.StrictAffinity = false
