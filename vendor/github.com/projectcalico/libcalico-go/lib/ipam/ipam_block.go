@@ -60,6 +60,7 @@ type allocationBlock struct {
 	*model.AllocationBlock
 }
 
+//zk
 func newBlock(cidr cnet.IPNet) (allocationBlock, error) {
 	b := model.AllocationBlock{}
 	//zk Gets the last bit of IP

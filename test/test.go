@@ -16,7 +16,7 @@ func main() {
 	}
 	defer cli.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	resp, err := cli.Get(ctx, "foo")
+	resp, err := cli.Get(ctx, "testkey")
 	cancel()
 	if err != nil {
 		log.Fatal(err)
