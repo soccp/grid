@@ -56,11 +56,11 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	if !conf.NodenameFileOptional {
 		// Configured to wait for the nodename file - don't start until it exists.
-		if _, err := os.Stat("/var/lib/calico/nodename"); err != nil {
-			s := "%s: check that the calico/node container is running and has mounted /var/lib/calico/"
+		if _, err := os.Stat("/var/lib/grid/nodename"); err != nil {
+			s := "%s: check that the grid/node container is running and has mounted /var/lib/grid/"
 			return fmt.Errorf(s, err)
 		}
-		logrus.Debug("/var/lib/calico/nodename exists")
+		logrus.Debug("/var/lib/grid/nodename exists")
 	}
 
 	// Determine which node name to use.
@@ -186,7 +186,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	// If running under Kubernetes then branch off into the kubernetes code, otherwise handle everything in this
 	// function.
 	if wepIDs.Orchestrator == api.OrchestratorKubernetes {
-		if result, err = k8s.CmdAddK8s(ctx, args, conf, *wepIDs, calicoClient, endpoint); err != nil {
+		if result, err = k8s.CmdAddK8s(ctx, args, conf, *wepIDs, calicoClient, endpoint, nodename); err != nil {
 			return err
 		}
 	} else {
@@ -372,7 +372,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 			}
 		}
 	}
-
 	// Set Gateway to nil. Calico IPAM doesn't set it, but host-local does.
 	// We modify IPs subnet received from the IPAM plugin (host-local),
 	// so Gateway isn't valid anymore. It is also not used anywhere by Calico.
@@ -394,11 +393,11 @@ func cmdDel(args *skel.CmdArgs) error {
 
 	if !conf.NodenameFileOptional {
 		// Configured to wait for the nodename file - don't start until it exists.
-		if _, err := os.Stat("/var/lib/calico/nodename"); err != nil {
-			s := "%s: check that the calico/node container is running and has mounted /var/lib/calico/"
+		if _, err := os.Stat("/var/lib/grid/nodename"); err != nil {
+			s := "%s: check that the calico/node container is running and has mounted /var/lib/grid/"
 			return fmt.Errorf(s, err)
 		}
-		logrus.Debug("/var/lib/calico/nodename exists")
+		logrus.Debug("/var/lib/grid/nodename exists")
 	}
 
 	// Determine which node name to use.
@@ -443,7 +442,7 @@ func cmdDel(args *skel.CmdArgs) error {
 
 	// Handle k8s specific bits of handling the DEL.
 	if epIDs.Orchestrator == api.OrchestratorKubernetes {
-		return k8s.CmdDelK8s(ctx, calicoClient, *epIDs, args, conf, logger)
+		return k8s.CmdDelK8s(ctx, calicoClient, *epIDs, args, conf, nodename, logger)
 	}
 
 	// Release the IP address by calling the configured IPAM plugin.

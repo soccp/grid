@@ -18,16 +18,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	n "net"
-	"strings"
-
-	log "github.com/sirupsen/logrus"
-
+	"github.com/coreos/etcd/clientv3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	cerrors "github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/names"
 	"github.com/projectcalico/libcalico-go/lib/net"
+	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
+	"io/ioutil"
+	n "net"
+	"os"
+	"strings"
+	"time"
 )
 
 const (
@@ -548,8 +551,11 @@ func (c ipamClient) AssignIP(ctx context.Context, args AssignIPArgs) error {
 		return err
 	}
 	log.Infof("Assigning IP %s to host: %s", args.IP, hostname)
-
-	if !c.blockReaderWriter.withinConfiguredPools(args.IP, hostname) {
+	hostcidr, err := getlocalcidr()
+	if err != nil {
+		return err
+	}
+	if !c.blockReaderWriter.withinConfiguredPools(args.IP, hostcidr) {
 		return errors.New("The provided IP address is not in a configured pool\n")
 	}
 
@@ -565,7 +571,7 @@ func (c ipamClient) AssignIP(ctx context.Context, args AssignIPArgs) error {
 
 			// Block doesn't exist, we need to create it.  First,
 			// validate the given IP address is within a configured pool.
-			if !c.blockReaderWriter.withinConfiguredPools(args.IP, hostname) {
+			if !c.blockReaderWriter.withinConfiguredPools(args.IP, hostcidr) {
 				estr := fmt.Sprintf("The given IP address (%s) is not in any configured pools", args.IP.String())
 				log.Errorf(estr)
 				return errors.New(estr)
@@ -578,7 +584,7 @@ func (c ipamClient) AssignIP(ctx context.Context, args AssignIPArgs) error {
 				return err
 			}
 
-			pa, err := c.blockReaderWriter.getPendingAffinity(ctx, hostname, blockCIDR)
+			pa, err := c.blockReaderWriter.getPendingAffinity(ctx, hostcidr, blockCIDR)
 			if err != nil {
 				if _, ok := err.(cerrors.ErrorResourceUpdateConflict); ok {
 					log.WithError(err).Debug("CAS error claiming affinity for block - retry")
@@ -636,6 +642,13 @@ func (c ipamClient) AssignIP(ctx context.Context, args AssignIPArgs) error {
 	}
 	return errors.New("Max retries hit - excessive concurrent IPAM requests")
 }
+func etcdips(ips string) (ip []string) {
+	s := strings.Split(ips, ",")
+	for i := 0; i < len(s); i++ {
+		ip = append(ip, s[i])
+	}
+	return ip
+}
 
 // ReleaseIPs releases any of the given IP addresses that are currently assigned,
 // so that they are available to be used in another assignment.
@@ -643,13 +656,58 @@ func (c ipamClient) ReleaseIPs(ctx context.Context, ips []net.IP) ([]net.IP, err
 	log.Infof("Releasing IP addresses: %v", ips)
 	unallocated := []net.IP{}
 
+	fi, err := os.Open("/etc/cni/net.d/10-grid.conflist")
+	if err != nil {
+		panic(err)
+	}
+	defer fi.Close()
+	fd, err := ioutil.ReadAll(fi)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load netconf: %v", err)
+	}
+	// fmt.Println(string(fd))
+
+	etcdip := gjson.Get(string(fd), "plugins").Array()[0].Get("etcd_endpoints").String()
+	log.Debugln("ETCD ENDPOINTS %s", etcdip)
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:   etcdips(etcdip),
+		DialTimeout: 10 * time.Second,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+	kv := clientv3.NewKV(client)
+	ctx = context.Background()
+	getResp, err := kv.Get(ctx, "/calico/ipam/v2/assignment/ipv4/block/", clientv3.WithPrefix())
+	if err != nil {
+		return nil, err
+	}
+	localcidr, err := getlocalcidr()
+	if err != nil {
+		return nil, err
+	}
+	var cidrStr string
+	local := strings.Join(strings.Split(localcidr, ".")[:3], ".")
+	for _, ev := range getResp.Kvs {
+		c := gjson.GetBytes(ev.Value, "cidr").String()
+		keys := strings.Join(strings.Split(c, ".")[:3], ".")
+		if local == keys {
+			cidrStr = c
+			break
+		}
+	}
+
 	// Group IP addresses by block to minimize the number of writes
 	// to the datastore required to release the given addresses.
 	ipsByBlock := map[string][]net.IP{}
 	for _, ip := range ips {
 		// Check if we've already got an entry for this block.
-		blockCIDR := getBlockCIDRForAddress(ip)
-		cidrStr := blockCIDR.String()
+		/*blockCIDR := getBlockCIDRForAddress(ip)
+		cidrStrs := blockCIDR.String()
+		mask := strings.Split(cidrStrs, "/")[1]
+		cidrStr := ip.To4().String() + "/" + mask*/
+		log.Debugf("cidr string %s", cidrStr)
 		if _, exists := ipsByBlock[cidrStr]; !exists {
 			// Entry does not exist, create it.
 			ipsByBlock[cidrStr] = []net.IP{}

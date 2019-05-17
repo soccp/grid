@@ -110,6 +110,7 @@ func DoNetworking(
 	if err != nil {
 		return "", "", err
 	}
+	logger.Debugf("local gateway is %v", gw)
 	err = ns.WithNetNSPath(args.Netns, func(hostNS ns.NetNS) error {
 		veth := &netlink.Veth{
 			LinkAttrs: netlink.LinkAttrs{
@@ -231,7 +232,7 @@ func DoNetworking(
 					logger.WithField("route", r).Debug("Skipping non-IPv4 route")
 					continue
 				}
-				logger.WithField("route", r).Debug("Adding IPv4 route")
+
 				//gw := net.IPv4(192, 168, 12, 1)
 				/*gw, err := GetGateway()
 				if err != nil {
@@ -240,6 +241,7 @@ func DoNetworking(
 				if err = ip.AddRoute(r, gw, contVeth); err != nil {
 					return fmt.Errorf("failed to add IPv4 route for %v via %v: %v", r, gw, err)
 				}
+				logger.WithField("route", r).Debug("Adding IPv4 route")
 			}
 		}
 

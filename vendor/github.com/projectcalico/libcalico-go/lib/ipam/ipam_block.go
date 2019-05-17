@@ -43,8 +43,8 @@ type ipVersion struct {
 var ipv4 ipVersion = ipVersion{
 	Number:            4,
 	TotalBits:         32,
-	BlockPrefixLength: 26,
-	BlockPrefixMask:   net.CIDRMask(26, 32),
+	BlockPrefixLength: 24,
+	BlockPrefixMask:   net.CIDRMask(24, 32),
 }
 
 var ipv6 ipVersion = ipVersion{
@@ -64,13 +64,13 @@ type allocationBlock struct {
 func newBlock(cidr cnet.IPNet) (allocationBlock, error) {
 	b := model.AllocationBlock{}
 	//zk Gets the last bit of IP
-	i := strings.Split(cidr.String(), "/")[0]
-	s, err := strconv.Atoi(strings.Split(i, ".")[3])
+	k := strings.Split(cidr.String(), "/")[0]
+	s, err := strconv.Atoi(strings.Split(k, ".")[3])
 	if err != nil {
 		return allocationBlock{&b}, fmt.Errorf("parse string to int err in function newBlock")
 	}
 	//zk Get the available length
-	blocksize := (253 - s + 1)
+	blocksize := (252 - s + 1)
 	b.Allocations = make([]*int, blocksize)
 	b.Unallocated = make([]int, blocksize)
 	b.StrictAffinity = false
@@ -380,14 +380,47 @@ func (b *allocationBlock) findOrAddAttribute(handleID *string, attrs map[string]
 	return attrIndex
 }
 
+func getlocalmask() (net.IPMask, error) {
+	addrs, err := net.InterfaceByName("br0")
+
+	if err != nil {
+		return nil, fmt.Errorf("get br0 addrs failed %s", err)
+	}
+
+	address, err := addrs.Addrs()
+	if err != nil {
+		return nil, fmt.Errorf("get br0 address failed %s", err)
+	}
+	add := address[0]
+	// 检查ip地址判断是否回环地址
+	if ipnet, ok := add.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+		if ipnet.IP.To4() != nil {
+			//fmt.Println(ipnet.IP.String())
+			//fmt.Println(ipnet.Mask.String())
+			//_, cidr, err := n.ParseCIDR(ipnet.String())
+			//if err != nil {
+			//		return "", fmt.Errorf("get br0 cidr failed %s", err)
+			//}
+			return ipnet.Mask, nil
+		}
+
+	}
+	return nil, fmt.Errorf("get %s localmask failed %s", "br0")
+}
+
 func getBlockCIDRForAddress(addr cnet.IP) cnet.IPNet {
 	var mask net.IPMask
+	var err error
 	if addr.Version() == 6 {
 		// This is an IPv6 address.
 		mask = ipv6.BlockPrefixMask
 	} else {
+		mask, err = getlocalmask()
+		if err != nil {
+			mask = ipv4.BlockPrefixMask
+		}
 		// This is an IPv4 address.
-		mask = ipv4.BlockPrefixMask
+		//mask = ipv4.BlockPrefixMask
 	}
 	masked := addr.Mask(mask)
 	return cnet.IPNet{net.IPNet{IP: masked, Mask: mask}}

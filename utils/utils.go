@@ -74,14 +74,14 @@ func DetermineNodename(conf types.NetConf) string {
 // nodenameFromFile reads the /var/lib/calico/nodename file if it exists and
 // returns the nodename within.
 func nodenameFromFile() string {
-	data, err := ioutil.ReadFile("/var/lib/calico/nodename")
+	data, err := ioutil.ReadFile("/var/lib/grid/nodename")
 	if err != nil {
 		if os.IsNotExist(err) {
 			// File doesn't exist, return empty string.
-			logrus.Info("File /var/lib/calico/nodename does not exist")
+			logrus.Info("File /var/lib/grid/nodename does not exist")
 			return ""
 		}
-		logrus.WithError(err).Error("Failed to read /var/lib/calico/nodename")
+		logrus.WithError(err).Error("Failed to read /var/lib/grid/nodename")
 		return ""
 	}
 	return strings.Replace(string(data), "\n", "", -1)
