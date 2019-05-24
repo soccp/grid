@@ -237,15 +237,15 @@ func CmdAddK8s(ctx context.Context, args *skel.CmdArgs, conf types.NetConf, epID
 
 	ipAddrsNoIpam := annot["cni.projectcalico.org/ipAddrsNoIpam"]
 	ipAddrs := annot["cni.projectcalico.org/ipAddrs"]
-
+	var etcdpath string
 	// Switch based on which annotations are passed or not passed.
 	switch {
 	case ipAddrs == "" && ipAddrsNoIpam == "":
 
 		if annot["keepip"] == "true" {
+			logger.Debugf("THIS POD NEED KEEP IP")
 			labels["podownertype"] = podowner
 			labels["podownername"] = podownername
-			logger.Debugf("this pod need keepip")
 			needkeep = true
 			cli, err := clientv3.New(clientv3.Config{
 				Endpoints:   parseetcdips(conf.EtcdEndpoints),
@@ -256,8 +256,13 @@ func CmdAddK8s(ctx context.Context, args *skel.CmdArgs, conf types.NetConf, epID
 			}
 			logger.Debugf("Init etcd client OK")
 			defer cli.Close()
+			if podowner != "statefulset" {
+				etcdpath = fmt.Sprintf("/grid/bindips/%s/%s/%s/%s", epIDs.Namespace, podowner, nodename, podownername)
+			} else {
+				etcdpath = fmt.Sprintf("/grid/bindips/%s/%s/%s", epIDs.Namespace, podowner, epIDs.Pod)
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			resp, err := cli.Get(ctx, "/calico/bindips/"+podowner+"/"+nodename+"/"+podownername)
+			resp, err := cli.Get(ctx, etcdpath)
 			cancel()
 			if err != nil {
 				return nil, err
@@ -454,9 +459,9 @@ func CmdAddK8s(ctx context.Context, args *skel.CmdArgs, conf types.NetConf, epID
 			logger.Errorln(err)
 		}
 		defer cli.Close()
-
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_, err = cli.Put(ctx, "/calico/bindips/"+podowner+"/"+nodename+"/"+podownername, podip)
+		//_, err = cli.Put(ctx, "/calico/bindips/"+podowner+"/"+nodename+"/"+podownername, podip)
+		_, err = cli.Put(ctx, etcdpath, podip)
 		cancel()
 		if err != nil {
 			logger.Errorln(err)
@@ -511,11 +516,11 @@ func CmdDelK8s(ctx context.Context, c calicoclient.Interface, epIDs utils.WEPIde
 		}
 	}
 	//zk
-	var podownertype, podownername string
+	var podowner, podownername string
 	var podip []string
 	var ipamErr error
 	if wep != nil {
-		podownertype = wep.ObjectMeta.Labels["podownertype"]
+		podowner = wep.ObjectMeta.Labels["podownertype"]
 		podownername = wep.ObjectMeta.Labels["podownername"]
 		podip = wep.Spec.IPNetworks
 		logger.Debugf("pod ipcidr %s", podip)
@@ -529,8 +534,17 @@ func CmdDelK8s(ctx context.Context, c calicoclient.Interface, epIDs utils.WEPIde
 
 		/*d := strings.Split(podownername, "-")
 		deployname := strings.Join(d[:(len(d)-1)], "-")*/
-		logger.Debugf("Deploy name is %s", podownername)
-		exist := getK8sDeploymentInfo(client, podownername, epIDs.Namespace)
+		var exist bool
+		if podowner == "deployment" {
+			logger.Debugf("Deploy name is %s", podownername)
+			exist = getK8sDeploymentInfo(client, podownername, epIDs.Namespace)
+		} else if podowner == "statefulset" {
+			logger.Debugf("StatefulSet name is %s", podownername)
+			exist = getK8sStatefulSetInfo(client, podownername, epIDs.Namespace)
+		} else {
+			logger.Debugf("Daemonset name is %s", podownername)
+			exist = getK8sDaemonSetInfo(client, podownername, epIDs.Namespace)
+		}
 		if exist {
 			ipamErr = nil
 		} else {
@@ -545,8 +559,13 @@ func CmdDelK8s(ctx context.Context, c calicoclient.Interface, epIDs utils.WEPIde
 			}
 			defer cli.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-
-			resp, err := cli.Delete(ctx, "/calico/bindips/"+podownertype+"/"+nodename+"/"+podownername)
+			var etcdpath string
+			if podowner != "statefulset" {
+				etcdpath = fmt.Sprintf("/grid/bindips/%s/%s/%s/%s", epIDs.Namespace, podowner, nodename, podownername)
+			} else {
+				etcdpath = fmt.Sprintf("/grid/bindips/%s/%s/%s", epIDs.Namespace, podowner, epIDs.Pod)
+			}
+			resp, err := cli.Delete(ctx, etcdpath)
 			cancel()
 			if err != nil {
 				ipamErr = err
@@ -867,7 +886,7 @@ func newK8sClient(conf types.NetConf, logger *logrus.Entry) (*kubernetes.Clients
 	return kubernetes.NewForConfig(config)
 }
 
-func getK8sPodInfo(client *kubernetes.Clientset, podName, podNamespace string) (labels map[string]string, annotations map[string]string, ports []api.EndpointPort, profiles []string, generateName string, podowner string, podownername string, err error) {
+func getK8sPodInfo(client *kubernetes.Clientset, podName, podNamespace string) (labels map[string]string, annotations map[string]string, ports []api.EndpointPort, profiles []string, generateName, podowner, podownername string, err error) {
 	pod, err := client.CoreV1().Pods(string(podNamespace)).Get(podName, metav1.GetOptions{})
 	logrus.Infof("pod info %+v", pod)
 	if err != nil {
@@ -885,17 +904,33 @@ func getK8sPodInfo(client *kubernetes.Clientset, podName, podNamespace string) (
 	profiles = kvp.Value.(*api.WorkloadEndpoint).Spec.Profiles
 	generateName = kvp.Value.(*api.WorkloadEndpoint).GenerateName
 	// zk
-	podowner = "deployment"
-	//generateName = strings.TrimRight(pregenerateName, "-")
-	p := strings.Split(generateName, "-")
-	podownername = strings.Join(p[:(len(p)-2)], "-")
+	//podowner = "deployment"
+	if _, ok := labels["workload.user.cattle.io/workloadselector"]; ok {
+		podownerinfo := labels["workload.user.cattle.io/workloadselector"]
+		field := strings.Split(podownerinfo, "-")
+		podowner = strings.ToLower(field[0])
+		podownername = strings.Join(field[2:], "-")
+	} else {
+		p := strings.Split(generateName, "-")
+		//logrus.Debugf("PODINFO %v", kvp.Value.(*api.WorkloadEndpoint).OwnerReferences)
+		//podownerinfo := kvp.Value.(*api.WorkloadEndpoint).OwnerReferences[0].Kind
+		podownerinfo := pod.OwnerReferences[0].Kind
+		if podownerinfo == "ReplicaSet" {
+			podowner = "deployment"
+			podownername = strings.Join(p[:(len(p)-2)], "-")
+		} else {
+			podowner = strings.ToLower(podownerinfo)
+			podownername = strings.Join(p[:(len(p)-1)], "-")
+		}
+	}
 
 	return labels, pod.Annotations, ports, profiles, generateName, podowner, podownername, nil
 }
 
-func getK8sDeploymentInfo(client *kubernetes.Clientset, deployname, deployNamespace string) (exist bool) {
-	deploy, err := client.AppsV1().Deployments(string(deployNamespace)).Get(deployname, metav1.GetOptions{})
-	logrus.Infof("deployment info %+v", deploy)
+//zk
+func getK8sDeploymentInfo(client *kubernetes.Clientset, name, namespace string) (exist bool) {
+	deploy, err := client.AppsV1().Deployments(string(namespace)).Get(name, metav1.GetOptions{})
+	logrus.Debugf("deployment info %+v", deploy)
 	if err != nil {
 		logrus.Debugln(err)
 		return false
@@ -903,7 +938,33 @@ func getK8sDeploymentInfo(client *kubernetes.Clientset, deployname, deployNamesp
 	if deploy.Status.Replicas != 0 {
 		return true
 	}
-	return true
+	return false
+}
+
+func getK8sStatefulSetInfo(client *kubernetes.Clientset, name, namespace string) (exist bool) {
+	sts, err := client.AppsV1().StatefulSets(string(namespace)).Get(name, metav1.GetOptions{})
+	logrus.Debugf("statefulset info %+v", sts)
+	if err != nil {
+		logrus.Debugln(err)
+		return false
+	}
+	if *sts.Spec.Replicas != 0 {
+		return true
+	}
+	return false
+}
+
+func getK8sDaemonSetInfo(client *kubernetes.Clientset, name, namespace string) (exist bool) {
+	ds, err := client.AppsV1().DaemonSets(string(namespace)).Get(name, metav1.GetOptions{})
+	logrus.Debugf("daemonset info %+v", ds)
+	if err != nil {
+		logrus.Debugln(err)
+		return false
+	}
+	if ds.Status.CurrentNumberScheduled != 0 {
+		return true
+	}
+	return false
 }
 
 func getPodCidr(client *kubernetes.Clientset, conf types.NetConf, nodename string) (string, error) {
