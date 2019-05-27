@@ -904,23 +904,25 @@ func getK8sPodInfo(client *kubernetes.Clientset, podName, podNamespace string) (
 	profiles = kvp.Value.(*api.WorkloadEndpoint).Spec.Profiles
 	generateName = kvp.Value.(*api.WorkloadEndpoint).GenerateName
 	// zk
-	//podowner = "deployment"
-	if _, ok := labels["workload.user.cattle.io/workloadselector"]; ok {
-		podownerinfo := labels["workload.user.cattle.io/workloadselector"]
-		field := strings.Split(podownerinfo, "-")
-		podowner = strings.ToLower(field[0])
-		podownername = strings.Join(field[2:], "-")
-	} else {
-		p := strings.Split(generateName, "-")
-		//logrus.Debugf("PODINFO %v", kvp.Value.(*api.WorkloadEndpoint).OwnerReferences)
-		//podownerinfo := kvp.Value.(*api.WorkloadEndpoint).OwnerReferences[0].Kind
-		podownerinfo := pod.OwnerReferences[0].Kind
-		if podownerinfo == "ReplicaSet" {
-			podowner = "deployment"
-			podownername = strings.Join(p[:(len(p)-2)], "-")
+	if pod.Annotations["keepip"] == "true" {
+		//podowner = "deployment"
+		if _, ok := labels["workload.user.cattle.io/workloadselector"]; ok {
+			podownerinfo := labels["workload.user.cattle.io/workloadselector"]
+			field := strings.Split(podownerinfo, "-")
+			podowner = strings.ToLower(field[0])
+			podownername = strings.Join(field[2:], "-")
 		} else {
-			podowner = strings.ToLower(podownerinfo)
-			podownername = strings.Join(p[:(len(p)-1)], "-")
+			p := strings.Split(generateName, "-")
+			//logrus.Debugf("PODINFO %v", kvp.Value.(*api.WorkloadEndpoint).OwnerReferences)
+			//podownerinfo := kvp.Value.(*api.WorkloadEndpoint).OwnerReferences[0].Kind
+			podownerinfo := pod.OwnerReferences[0].Kind
+			if podownerinfo == "ReplicaSet" {
+				podowner = "deployment"
+				podownername = strings.Join(p[:(len(p)-2)], "-")
+			} else {
+				podowner = strings.ToLower(podownerinfo)
+				podownername = strings.Join(p[:(len(p)-1)], "-")
+			}
 		}
 	}
 
