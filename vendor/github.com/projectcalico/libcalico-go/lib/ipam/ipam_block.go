@@ -17,13 +17,14 @@ package ipam
 import (
 	"errors"
 	"fmt"
+	log "github.com/sirupsen/logrus"
+	"io/ioutil"
 	"math/big"
 	"net"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	cnet "github.com/projectcalico/libcalico-go/lib/net"
@@ -65,12 +66,21 @@ func newBlock(cidr cnet.IPNet) (allocationBlock, error) {
 	b := model.AllocationBlock{}
 	//zk Gets the last bit of IP
 	k := strings.Split(cidr.String(), "/")[0]
+	/*suffix, err := getsuffix()
+	if err == nil {
+		return allocationBlock{&b}, err
+	}*/
 	s, err := strconv.Atoi(strings.Split(k, ".")[3])
 	if err != nil {
 		return allocationBlock{&b}, fmt.Errorf("parse string to int err in function newBlock")
 	}
+	/*suff, err := strconv.Atoi(suffix)
+	if err != nil {
+		return allocationBlock{&b}, fmt.Errorf("parse suffix string to int err in function newBlock")
+	}*/
 	//zk Get the available length
-	blocksize := (252 - s + 1)
+	//blocksize := (suff - s + 1)
+	blocksize := (250 - s + 1)
 	b.Allocations = make([]*int, blocksize)
 	b.Unallocated = make([]int, blocksize)
 	b.StrictAffinity = false
@@ -406,6 +416,20 @@ func getlocalmask() (net.IPMask, error) {
 
 	}
 	return nil, fmt.Errorf("get %s localmask failed %s", "br0")
+}
+
+func getsuffix() (suffix string, err error) {
+	data, err := ioutil.ReadFile("/var/lib/grid/suffix")
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File doesn't exist, return empty string.
+			log.Info("File /var/lib/grid/suffix does not exist")
+			return "", fmt.Errorf("%s", "File /var/lib/grid/suffix does not exist")
+		}
+		log.WithError(err).Error("Failed to read /var/lib/grid/suffix")
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), fmt.Errorf("%s", "Failed to read /var/lib/grid/suffix")
 }
 
 func getBlockCIDRForAddress(addr cnet.IP) cnet.IPNet {

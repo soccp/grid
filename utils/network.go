@@ -107,6 +107,10 @@ func DoNetworking(
 		return "", "", err
 	}*/
 	gw, err := GetGateway()
+	localinfo, err := GetLocalNetInfo()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get local netinfo for k8s service cidr")
+	}
 	if err != nil {
 		return "", "", err
 	}
@@ -240,6 +244,19 @@ func DoNetworking(
 				}*/
 				if err = ip.AddRoute(r, gw, contVeth); err != nil {
 					return fmt.Errorf("failed to add IPv4 route for %v via %v: %v", r, gw, err)
+				}
+				// add k8s service cidr route to localhost
+				ds := net.IPv4(10, 96, 0, 0)
+				dsNet := &net.IPNet{IP: ds, Mask: net.CIDRMask(12, 32)}
+				local := *localinfo
+				route := netlink.Route{
+					LinkIndex: contVeth.Attrs().Index,
+					Dst:       dsNet,
+					Gw:        local.IP,
+				}
+				err = netlink.RouteAdd(&route)
+				if err != nil {
+					return fmt.Errorf("failed to add IPv4 route for k8s service cidr")
 				}
 				logger.WithField("route", r).Debug("Adding IPv4 route")
 			}
@@ -462,7 +479,7 @@ func Brctl(hostvethName string) error {
 	return nil
 }
 
-// zk Get GateWay
+// zk get br0 ip
 func GetLocalNetInfo() (ipnet *net.IPNet, err error) {
 	addrs, err := net.InterfaceByName("br0")
 
@@ -478,8 +495,6 @@ func GetLocalNetInfo() (ipnet *net.IPNet, err error) {
 	// 检查ip地址判断是否回环地址
 	if ipnet, ok := add.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 		if ipnet.IP.To4() != nil {
-			//fmt.Println(ipnet.IP.String())
-			//fmt.Println(ipnet.Mask.String())
 			return ipnet, err
 		}
 
@@ -518,5 +533,4 @@ func GetGateway() (gateway net.IP, err error) {
 		return routes[0].Gw, nil
 	}
 	return nil, fmt.Errorf("error get br0 default gateway")
-
 }
