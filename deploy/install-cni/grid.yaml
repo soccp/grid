@@ -1,0 +1,129 @@
+# Calico Version v3.2.3
+# https://docs.projectcalico.org/v3.2/releases#v3.2.3
+# This manifest includes the following component versions:
+#   calico/node:v3.2.3
+#   calico/cni:v3.2.3
+#   calico/kube-controllers:v3.2.3
+
+# This ConfigMap is used to configure a self-hosted Calico installation.
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: grid-config
+  namespace: kube-system
+data:
+  # Configure this with the location of your etcd cluster.
+  etcd_endpoints: "http://10.96.232.136:6666"
+
+  # If you're using TLS enabled etcd uncomment the following.
+  # You must also populate the Secret below with these files.
+  etcd_ca: ""   # "/grid-secrets/etcd-ca"
+  etcd_cert: "" # "/grid-secrets/etcd-cert"
+  etcd_key: ""  # "/grid-secrets/etcd-key"
+  # Configure the Calico backend to use.
+
+  # Configure the MTU to use
+  veth_mtu: "1500"
+---
+
+
+# The following contains k8s Secrets for use with a TLS enabled etcd cluster.
+# For information on populating Secrets, see http://kubernetes.io/docs/user-guide/secrets/
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: grid-etcd-secrets
+  namespace: kube-system
+data:
+  # Populate the following files with etcd TLS configuration if desired, but leave blank if
+  # not using TLS for etcd.
+  # This self-hosted install expects three files with the following names.  The values
+  # should be base64 encoded strings of the entire contents of each file.
+  # etcd-key: null
+  # etcd-cert: null
+  # etcd-ca: null
+
+---
+
+# This manifest installs the calico/node container, as well
+# as the Calico CNI plugins and network config on
+# each master and worker node in a Kubernetes cluster.
+kind: DaemonSet
+apiVersion: extensions/v1beta1
+metadata:
+  name: install-cni
+  namespace: kube-system
+spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: install-cni
+      annotations:
+        # This, along with the CriticalAddonsOnly toleration below,
+        # marks the pod as a critical add-on, ensuring it gets
+        # priority scheduling and that its resources are reserved
+        # if it ever gets evicted.
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      serviceAccountName: grid-node
+      nodeSelector:
+        beta.kubernetes.io/os: linux
+      terminationGracePeriodSeconds: 0
+      containers:
+        # This container installs the Calico CNI binaries
+        # and CNI network config file on each node.
+        - name: install-cni
+          image: install-cni:0624
+          env:
+            # Name of the CNI config file to create.
+            - name: CNI_CONF_NAME
+              value: "10-grid.conflist"
+            # The location of the Calico etcd cluster.
+            - name: ETCD_ENDPOINTS
+              valueFrom:
+                configMapKeyRef:
+                  name: grid-config
+                  key: etcd_endpoints
+            # CNI MTU Config variable
+            - name: CNI_MTU
+              valueFrom:
+                configMapKeyRef:
+                  name: grid-config
+                  key: veth_mtu
+          volumeMounts:
+            - mountPath: /host/opt/cni/bin
+              name: cni-bin-dir
+            - mountPath: /host/etc/cni/net.d
+              name: cni-net-dir
+            - mountPath: /grid-secrets
+              name: etcd-certs
+          securityContext:
+            privileged: true
+      volumes:
+        # Used to install CNI.
+        - name: cni-bin-dir
+          hostPath:
+            path: /opt/cni/bin
+        - name: cni-net-dir
+          hostPath:
+            path: /etc/cni/net.d
+        # Mount in the etcd TLS secrets with mode 400.
+        # See https://kubernetes.io/docs/concepts/configuration/secret/
+        - name: etcd-certs
+          secret:
+            secretName: grid-etcd-secrets
+            defaultMode: 0400
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: grid-node
+  namespace: kube-system
+
+---
