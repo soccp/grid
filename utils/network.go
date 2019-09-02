@@ -84,7 +84,7 @@ func DoNetworking(
 	routes []*net.IPNet,
 ) (hostVethName, contVethMAC string, err error) {
 	// Select the first 11 characters of the containerID for the host veth.
-	hostVethName = "cali" + args.ContainerID[:Min(11, len(args.ContainerID))]
+	hostVethName = "grid" + args.ContainerID[:Min(11, len(args.ContainerID))]
 	contVethName := args.IfName
 	var hasIPv4, hasIPv6 bool
 

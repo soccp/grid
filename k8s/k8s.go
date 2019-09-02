@@ -28,6 +28,8 @@ import (
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ipam"
+	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/pkg/transport"
 	"github.com/projectcalico/cni-plugin/types"
 	"github.com/projectcalico/cni-plugin/utils"
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
@@ -37,8 +39,6 @@ import (
 	cnet "github.com/projectcalico/libcalico-go/lib/net"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	"github.com/sirupsen/logrus"
-	//"go.etcd.io/etcd/clientv3"
-	"github.com/coreos/etcd/clientv3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -247,8 +247,21 @@ func CmdAddK8s(ctx context.Context, args *skel.CmdArgs, conf types.NetConf, epID
 			labels["podownertype"] = podowner
 			labels["podownername"] = podownername
 			needkeep = true
+
+			tlsInfo := &transport.TLSInfo{
+				CAFile:   conf.EtcdCaCertFile,
+				CertFile: conf.EtcdCertFile,
+				KeyFile:  conf.EtcdKeyFile,
+			}
+
+			tls, err := tlsInfo.ClientConfig()
+			if err != nil {
+				return nil, fmt.Errorf("could not initialize etcdv3 client: %+v", err)
+			}
+
 			cli, err := clientv3.New(clientv3.Config{
-				Endpoints:   parseetcdips(conf.EtcdEndpoints),
+				Endpoints:   strings.Split(conf.EtcdEndpoints, ","),
+				TLS:         tls,
 				DialTimeout: 3 * time.Second,
 			})
 			if err != nil {
@@ -323,6 +336,7 @@ func CmdAddK8s(ctx context.Context, args *skel.CmdArgs, conf types.NetConf, epID
 				return nil, errors.New("IPAM plugin returned missing IP config")
 			}
 			podip = result.IPs[0].Address.IP.To4().String()
+			getip = true
 		}
 
 	case ipAddrs != "" && ipAddrsNoIpam != "":
@@ -450,11 +464,25 @@ func CmdAddK8s(ctx context.Context, args *skel.CmdArgs, conf types.NetConf, epID
 		Name: endpoint.Spec.InterfaceName, Sandbox: endpoint.Spec.Endpoint},
 	)
 	//zk
-	if !getip && needkeep {
+	if getip && needkeep {
+
+		tlsInfo := &transport.TLSInfo{
+			CAFile:   conf.EtcdCaCertFile,
+			CertFile: conf.EtcdCertFile,
+			KeyFile:  conf.EtcdKeyFile,
+		}
+
+		tls, err := tlsInfo.ClientConfig()
+		if err != nil {
+			return nil, fmt.Errorf("could not initialize etcdv3 client: %+v", err)
+		}
+
 		cli, err := clientv3.New(clientv3.Config{
-			Endpoints:   parseetcdips(conf.EtcdEndpoints),
+			Endpoints:   strings.Split(conf.EtcdEndpoints, ","),
+			TLS:         tls,
 			DialTimeout: 3 * time.Second,
 		})
+
 		if err != nil {
 			logger.Errorln(err)
 		}
@@ -550,9 +578,22 @@ func CmdDelK8s(ctx context.Context, c calicoclient.Interface, epIDs utils.WEPIde
 		} else {
 			// Release the IP address for this container by calling the configured IPAM plugin.
 			logger.Info("Releasing IP Bind relation")
+
+			tlsInfo := &transport.TLSInfo{
+				CAFile:   conf.EtcdCaCertFile,
+				CertFile: conf.EtcdCertFile,
+				KeyFile:  conf.EtcdKeyFile,
+			}
+
+			tls, err := tlsInfo.ClientConfig()
+			if err != nil {
+				return fmt.Errorf("could not initialize etcdv3 client: %+v", err)
+			}
+
 			cli, err := clientv3.New(clientv3.Config{
-				Endpoints:   parseetcdips(conf.EtcdEndpoints),
-				DialTimeout: 5 * time.Second,
+				Endpoints:   strings.Split(conf.EtcdEndpoints, ","),
+				TLS:         tls,
+				DialTimeout: 3 * time.Second,
 			})
 			if err != nil {
 				return err
