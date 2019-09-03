@@ -13,36 +13,17 @@ metadata:
   namespace: kube-system
 data:
   # Configure this with the location of your etcd cluster.
-  etcd_endpoints: "http://10.96.232.136:6666"
+  etcd_endpoints: "https://192.168.14.41:2379"
 
   # If you're using TLS enabled etcd uncomment the following.
   # You must also populate the Secret below with these files.
-  etcd_ca: ""   # "/grid-secrets/etcd-ca"
-  etcd_cert: "" # "/grid-secrets/etcd-cert"
-  etcd_key: ""  # "/grid-secrets/etcd-key"
+  #etcd_ca: ""   # "/grid-secrets/etcd-ca"
+  #etcd_cert: "" # "/grid-secrets/etcd-cert"
+  #etcd_key: ""  # "/grid-secrets/etcd-key"
   # Configure the Calico backend to use.
 
   # Configure the MTU to use
   veth_mtu: "1500"
----
-
-
-# The following contains k8s Secrets for use with a TLS enabled etcd cluster.
-# For information on populating Secrets, see http://kubernetes.io/docs/user-guide/secrets/
-apiVersion: v1
-kind: Secret
-type: Opaque
-metadata:
-  name: grid-etcd-secrets
-  namespace: kube-system
-data:
-  # Populate the following files with etcd TLS configuration if desired, but leave blank if
-  # not using TLS for etcd.
-  # This self-hosted install expects three files with the following names.  The values
-  # should be base64 encoded strings of the entire contents of each file.
-  # etcd-key: null
-  # etcd-cert: null
-  # etcd-ca: null
 
 ---
 
@@ -70,15 +51,18 @@ spec:
         # if it ever gets evicted.
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
-      serviceAccountName: grid-cni-plugin
+      hostNetwork: true
       nodeSelector:
-        beta.kubernetes.io/os: linux
-      terminationGracePeriodSeconds: 0
+        beta.kubernetes.io/arch: amd64
+      tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      serviceAccountName: grid-cni-plugin
       containers:
         # This container installs the Calico CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: install-cni:0624
+          image: socp.io/library/install-cni:0903
           command: ["/install-cni.sh"]
           env:
             # Name of the CNI config file to create.
@@ -103,6 +87,8 @@ spec:
               name: cni-net-dir
             - mountPath: /grid-secrets
               name: etcd-certs
+            - mountPath: /var/lib/grid
+              name: grid
           securityContext:
             privileged: true
       volumes:
@@ -113,11 +99,14 @@ spec:
         - name: cni-net-dir
           hostPath:
             path: /etc/cni/net.d
+        - name: grid
+          hostPath:
+            path: /var/lib/grid
         # Mount in the etcd TLS secrets with mode 400.
         # See https://kubernetes.io/docs/concepts/configuration/secret/
         - name: etcd-certs
           secret:
-            secretName: grid-etcd-secrets
+            secretName: etcd-certs
             defaultMode: 0400
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
@@ -151,3 +140,4 @@ kind: ServiceAccount
 metadata:
   name: grid-cni-plugin
   namespace: kube-system
+

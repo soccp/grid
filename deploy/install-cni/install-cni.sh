@@ -2,6 +2,16 @@
 
 set -u -e
 
+ip addr show br0 |grep 'inet' |sed 's/^.*inet //g' |grep -v inet6 | sed 's:/24.*$::g' > /var/lib/grid/nodename
+
+if [[ ! -s /var/lib/grid/nodename ]]
+then
+   echo "ubable to get br0 ip"
+   exit 1
+else
+   echo "br0 already exist"
+fi
+
 # Capture the usual signals and exit from the script
 trap 'echo "SIGINT received, simply exiting..."; exit 0' SIGINT
 trap 'echo "SIGTERM received, simply exiting..."; exit 0' SIGTERM
@@ -33,41 +43,25 @@ fi
 
 # If the TLS assets actually exist, update the variables to populate into the
 # CNI network config.  Otherwise, we'll just fill that in with blanks.
-if [ -e "/host/etc/cni/net.d/grid-tls/etcd-ca" ];
+if [ -e "/host/etc/cni/net.d/grid-tls/ca.crt" ];
 then
-  CNI_CONF_ETCD_CA=${HOST_SECRETS_DIR}/etcd-ca
+  CNI_CONF_ETCD_CA=${HOST_SECRETS_DIR}/ca.crt
 fi
 
-if [ -e "/host/etc/cni/net.d/grid-tls/etcd-key" ];
+if [ -e "/host/etc/cni/net.d/grid-tls/server.key" ];
 then
-  CNI_CONF_ETCD_KEY=${HOST_SECRETS_DIR}/etcd-key
+  CNI_CONF_ETCD_KEY=${HOST_SECRETS_DIR}/server.key
 fi
 
-if [ -e "/host/etc/cni/net.d/grid-tls/etcd-cert" ];
+if [ -e "/host/etc/cni/net.d/grid-tls/server.crt" ];
 then
-  CNI_CONF_ETCD_CERT=${HOST_SECRETS_DIR}/etcd-cert
+  CNI_CONF_ETCD_CERT=${HOST_SECRETS_DIR}/server.crt
 fi
-
-# Choose which default cni binaries should be copied
-SKIP_CNI_BINARIES=${SKIP_CNI_BINARIES:-""}
-SKIP_CNI_BINARIES=",$SKIP_CNI_BINARIES,"
-UPDATE_CNI_BINARIES=${UPDATE_CNI_BINARIES:-"true"}
 
 # Place the new binaries if the directory is writeable.
+dir="/host/opt/cni/bin"
 for path in /opt/cni/bin/*;
 do
-  filename="$(basename $path)"
-  tmp=",$filename,"
-  if [ "${SKIP_CNI_BINARIES#*$tmp}" != "$SKIP_CNI_BINARIES" ];
-  then
-    echo "$filename is in SKIP_CNI_BINARIES, skipping"
-    continue
-  fi
-  if [ "${UPDATE_CNI_BINARIES}" != "true" -a -f $dir/$filename ];
-  then
-    echo "$dir/$filename is already here and UPDATE_CNI_BINARIES isn't true, skipping"
-    continue
-  fi
   cp $path $dir/
   if [ "$?" != "0" ];
   then
@@ -77,7 +71,6 @@ do
 done
 
 echo "Wrote GRID CNI binaries to $dir"
-echo "CNI plugin version: $($dir/grid -v)"
 
 TMP_CONF='/grid.conf.tmp'
 # If specified, overwrite the network configuration file.
@@ -149,7 +142,7 @@ fi
 grep "__KUBERNETES_SERVICE_HOST__" $TMP_CONF && sed -i s/__KUBERNETES_SERVICE_HOST__/${KUBERNETES_SERVICE_HOST}/g $TMP_CONF
 grep "__KUBERNETES_SERVICE_PORT__" $TMP_CONF && sed -i s/__KUBERNETES_SERVICE_PORT__/${KUBERNETES_SERVICE_PORT}/g $TMP_CONF
 sed -i s/__KUBERNETES_NODE_NAME__/${KUBERNETES_NODE_NAME:-$(hostname)}/g $TMP_CONF
-sed -i s/__KUBECONFIG_FILENAME__/calico-kubeconfig/g $TMP_CONF
+sed -i s/__KUBECONFIG_FILENAME__/grid-kubeconfig/g $TMP_CONF
 sed -i s/__CNI_MTU__/${CNI_MTU:-1500}/g $TMP_CONF
 
 # Use alternative command character "~", since these include a "/".
@@ -188,18 +181,6 @@ echo "Created CNI config ${CNI_CONF_NAME}"
 should_sleep=${SLEEP:-"true"}
 echo "Done configuring CNI.  Sleep=$should_sleep"
 while [ "$should_sleep" == "true"  ]; do
-  # Kubernetes Secrets can be updated.  If so, we need to install the updated
-  # version to the host. Just check the timestamp on the certificate to see if it
-  # has been updated.  A bit hokey, but likely good enough.
-  if [ -e ${SECRETS_MOUNT_DIR}/etcd-cert ];
-  then
-    stat_output=$(stat -c%y ${SECRETS_MOUNT_DIR}/etcd-cert 2>/dev/null)
-    sleep 10;
-    if [ "$stat_output" != "$(stat -c%y ${SECRETS_MOUNT_DIR}/etcd-cert 2>/dev/null)" ]; then
-      echo "Updating installed secrets at: $(date)"
-      cp -p ${SECRETS_MOUNT_DIR}/* /host/etc/cni/net.d/grid-tls/
-    fi
-  else
-    sleep 10
-  fi
+    echo "WAITING FOR DELETE"
+    sleep 3600
 done

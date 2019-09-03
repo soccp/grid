@@ -59,7 +59,7 @@ func VethNameForWorkload(namespace, podname string) string {
 	prefix := os.Getenv("FELIX_INTERFACEPREFIX")
 	if prefix == "" {
 		// Prefix is not set. Default to "cali"
-		prefix = "cali"
+		prefix = "grid"
 	} else {
 		// Prefix is set - use the first value in the list.
 		splits := strings.Split(prefix, ",")
