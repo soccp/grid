@@ -62,7 +62,7 @@ spec:
         # This container installs the Calico CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: socp.io/library/install-cni:0903
+          image: socp.io/library/install-cni:0904
           command: ["/install-cni.sh"]
           env:
             # Name of the CNI config file to create.
