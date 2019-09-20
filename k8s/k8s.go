@@ -336,7 +336,6 @@ func CmdAddK8s(ctx context.Context, args *skel.CmdArgs, conf types.NetConf, epID
 				return nil, errors.New("IPAM plugin returned missing IP config")
 			}
 			podip = result.IPs[0].Address.IP.To4().String()
-			getip = true
 		}
 
 	case ipAddrs != "" && ipAddrsNoIpam != "":
@@ -464,7 +463,7 @@ func CmdAddK8s(ctx context.Context, args *skel.CmdArgs, conf types.NetConf, epID
 		Name: endpoint.Spec.InterfaceName, Sandbox: endpoint.Spec.Endpoint},
 	)
 	//zk
-	if getip && needkeep {
+	if !getip && needkeep {
 
 		tlsInfo := &transport.TLSInfo{
 			CAFile:   conf.EtcdCaCertFile,

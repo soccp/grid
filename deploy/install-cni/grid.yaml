@@ -13,7 +13,7 @@ metadata:
   namespace: kube-system
 data:
   # Configure this with the location of your etcd cluster.
-  etcd_endpoints: "https://192.168.14.41:2379"
+  etcd_endpoints: "https://172.16.30.100:2379"
 
   # If you're using TLS enabled etcd uncomment the following.
   # You must also populate the Secret below with these files.
@@ -62,7 +62,7 @@ spec:
         # This container installs the Calico CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: socp.io/library/install-cni:0904
+          image: socp.io/library/install-cni:0917
           command: ["/install-cni.sh"]
           env:
             # Name of the CNI config file to create.
@@ -128,10 +128,8 @@ apiVersion: rbac.authorization.k8s.io/v1beta1
 metadata:
   name: grid-cni-plugin
 rules:
-  - apiGroups: [""]
-    resources:
-      - pods
-      - nodes
+  - apiGroups: ["*"]
+    resources: ["*"]
     verbs:
       - get
 ---

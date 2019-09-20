@@ -15,9 +15,16 @@
 package ipam
 
 import (
+	"context"
+	//"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/pkg/transport"
+	"github.com/projectcalico/libcalico-go/lib/backend/model"
+	cnet "github.com/projectcalico/libcalico-go/lib/net"
 	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
 	"io/ioutil"
 	"math/big"
 	"net"
@@ -25,9 +32,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-
-	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	cnet "github.com/projectcalico/libcalico-go/lib/net"
+	"time"
 )
 
 const (
@@ -55,21 +60,109 @@ var ipv6 ipVersion = ipVersion{
 	BlockPrefixMask:   net.CIDRMask(122, 128),
 }
 
+type GridNetConf struct {
+	CNIVersion string `json:"cniVersion,omitempty"`
+	Name       string `json:"name"`
+	Plugin     struct {
+		EtcdEndpoints  string `json:"etcd_endpoints"`
+		EtcdKeyFile    string `json:"etcd_key_file"`
+		EtcdCertFile   string `json:"etcd_cert_file"`
+		EtcdCaCertFile string `json:"etcd_ca_cert_file"`
+	} `json:"plugins"`
+}
+
 // Wrap the backend AllocationBlock struct so that we can
 // attach methods to it.
 type allocationBlock struct {
 	*model.AllocationBlock
 }
 
+func nodenameFromFile() string {
+	data, err := ioutil.ReadFile("/var/lib/grid/nodename")
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File doesn't exist, return empty string.
+			log.Info("File /var/lib/grid/nodename does not exist")
+			return ""
+		}
+		log.WithError(err).Error("Failed to read /var/lib/grid/nodename")
+		return ""
+	}
+	return strings.Replace(string(data), "\n", "", -1)
+}
+
+func getsuffix() (int, error) {
+	nodename := nodenameFromFile()
+	if nodename == "" {
+		return 0, fmt.Errorf("could not get nodename")
+	}
+	na := strings.Split(nodename, ".")
+	newstring := strings.Join(na[:3], ".")
+	//conf := GridNetConf{}
+	fi, err := os.Open("/etc/cni/net.d/10-grid.conflist")
+	if err != nil {
+		return 0, fmt.Errorf("could not get nodename: %+v", err)
+	}
+	defer fi.Close()
+	fd, err := ioutil.ReadAll(fi)
+	//json.Unmarshal([]byte(fd), &conf)
+	value := (gjson.GetBytes([]byte(fd), "plugins").Array())[0]
+	log.Debugf("conf is %v", value)
+	tlsInfo := &transport.TLSInfo{
+		CAFile:   value.Get("etcd_ca_cert_file").String(),
+		CertFile: value.Get("etcd_cert_file").String(),
+		KeyFile:  value.Get("etcd_key_file").String(),
+	}
+
+	tls, err := tlsInfo.ClientConfig()
+	if err != nil {
+		return 0, fmt.Errorf("could not initialize etcdv3 client: %+v", err)
+	}
+
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints:   strings.Split(value.Get("etcd_endpoints").String(), ","),
+		TLS:         tls,
+		DialTimeout: 3 * time.Second,
+	})
+
+	if err != nil {
+		return 0, fmt.Errorf("could not initialize etcdv3 client: %+v", err)
+	}
+	kv := clientv3.NewKV(cli)
+	defer cli.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	path := fmt.Sprintf("/calico/resources/v3/projectcalico.org/ippools/%s", newstring)
+	//_, err = cli.Put(ctx, "/calico/bindips/"+podowner+"/"+nodename+"/"+podownername, podip)
+	if getResp, err := kv.Get(ctx, path, clientv3.WithPrefix()); err != nil {
+		cancel()
+		return 0, fmt.Errorf("could not initialize etcdv3 kv client: %+v", err)
+	} else {
+		value := getResp.Kvs[0].Key
+		na := strings.Split(string(value), "/")
+		ip := na[len(na)-1]
+		suffix := strings.Split(ip, "-")
+		s := suffix[len(suffix)-1]
+		cancel()
+		ints, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, fmt.Errorf("could not parse string to int: %+v", err)
+		}
+		return ints, nil
+	}
+
+}
+
 //zk
 func newBlock(cidr cnet.IPNet) (allocationBlock, error) {
+
+	log.Infoln("START GENERATE NEW BLOCK")
 	b := model.AllocationBlock{}
 	//zk Gets the last bit of IP
 	k := strings.Split(cidr.String(), "/")[0]
-	/*suffix, err := getsuffix()
-	if err == nil {
+	suffix, err := getsuffix()
+	if err != nil {
 		return allocationBlock{&b}, err
-	}*/
+	}
 	s, err := strconv.Atoi(strings.Split(k, ".")[3])
 	if err != nil {
 		return allocationBlock{&b}, fmt.Errorf("parse string to int err in function newBlock")
@@ -79,8 +172,9 @@ func newBlock(cidr cnet.IPNet) (allocationBlock, error) {
 		return allocationBlock{&b}, fmt.Errorf("parse suffix string to int err in function newBlock")
 	}*/
 	//zk Get the available length
-	//blocksize := (suff - s + 1)
-	blocksize := (250 - s + 1)
+	log.Infoln("suffix is %d", suffix)
+	blocksize := (suffix - s + 1)
+	//blocksize := (250 - s + 1)
 	b.Allocations = make([]*int, blocksize)
 	b.Unallocated = make([]int, blocksize)
 	b.StrictAffinity = false
@@ -418,7 +512,7 @@ func getlocalmask() (net.IPMask, error) {
 	return nil, fmt.Errorf("get %s localmask failed %s", "br0")
 }
 
-func getsuffix() (suffix string, err error) {
+/*func getsuffix() (suffix string, err error) {
 	data, err := ioutil.ReadFile("/var/lib/grid/suffix")
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -430,7 +524,7 @@ func getsuffix() (suffix string, err error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(data)), fmt.Errorf("%s", "Failed to read /var/lib/grid/suffix")
-}
+}*/
 
 func getBlockCIDRForAddress(addr cnet.IP) cnet.IPNet {
 	var mask net.IPMask

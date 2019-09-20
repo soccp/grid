@@ -2,8 +2,8 @@
 
 set -u -e
 
-ip addr show br0 |grep 'inet' |sed 's/^.*inet //g' |grep -v inet6 | sed 's:/24.*$::g' > /var/lib/grid/nodename
-
+ip addr show br0 |grep 'inet'|sed 's/^.*inet //g' |grep -v inet6 | sed 's:/24.*$::g' > /var/lib/grid/nodename
+sed -i '2,$d' /var/lib/grid/nodename
 if [[ ! -s /var/lib/grid/nodename ]]
 then
    echo "ubable to get br0 ip"
