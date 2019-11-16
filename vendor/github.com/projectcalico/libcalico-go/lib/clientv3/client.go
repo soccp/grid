@@ -156,7 +156,7 @@ func (p poolAccessor) GetEnabledPools(ipVersion int, hostcidr string) ([]net.IPN
 		} else if ip, cidr, err := net.GetCIDR(pool.Spec.CIDR); err == nil && cidr.Version() == ipVersion {
 			log.Debugf("test pool (%s) name is (%s)", cidr.String(), pool.ObjectMeta.Name)
 			//if matchPool(hostname, pool.ObjectMeta.Name) {
-			log.Debugf("cidrSRTing: %s", cidr.String())
+			log.Debugf("cidrString: %s", cidr.String())
 			log.Debugf("HOSTCIDR:%s", hostcidr)
 			if cidr.String() == hostcidr {
 				log.Debugf("Adding pool (%s) to the enabled IPPool list", pool.Spec.CIDR)

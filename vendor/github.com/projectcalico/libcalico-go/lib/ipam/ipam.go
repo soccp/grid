@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/pkg/transport"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	cerrors "github.com/projectcalico/libcalico-go/lib/errors"
@@ -655,23 +656,31 @@ func etcdips(ips string) (ip []string) {
 func (c ipamClient) ReleaseIPs(ctx context.Context, ips []net.IP) ([]net.IP, error) {
 	log.Infof("Releasing IP addresses: %v", ips)
 	unallocated := []net.IP{}
-
+	//zk
 	fi, err := os.Open("/etc/cni/net.d/10-grid.conflist")
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("could not get nodename: %+v", err)
 	}
 	defer fi.Close()
 	fd, err := ioutil.ReadAll(fi)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load netconf: %v", err)
+	//json.Unmarshal([]byte(fd), &conf)
+	value := (gjson.GetBytes([]byte(fd), "plugins").Array())[0]
+	log.Debugf("conf is %v", value)
+	tlsInfo := &transport.TLSInfo{
+		CAFile:   value.Get("etcd_ca_cert_file").String(),
+		CertFile: value.Get("etcd_cert_file").String(),
+		KeyFile:  value.Get("etcd_key_file").String(),
 	}
-	// fmt.Println(string(fd))
 
-	etcdip := gjson.Get(string(fd), "plugins").Array()[0].Get("etcd_endpoints").String()
-	log.Debugln("ETCD ENDPOINTS %s", etcdip)
+	tls, err := tlsInfo.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("could not initialize etcdv3 client: %+v", err)
+	}
+
 	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   etcdips(etcdip),
-		DialTimeout: 10 * time.Second,
+		Endpoints:   strings.Split(value.Get("etcd_endpoints").String(), ","),
+		TLS:         tls,
+		DialTimeout: 3 * time.Second,
 	})
 	if err != nil {
 		return nil, err
