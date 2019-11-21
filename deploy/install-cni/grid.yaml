@@ -10,19 +10,12 @@ kind: ConfigMap
 apiVersion: v1
 metadata:
   name: grid-config
-  namespace: kube-system
+  namespace: cni
 data:
   # Configure this with the location of your etcd cluster.
   etcd_endpoints: "https://172.16.30.100:2379"
-
-  # If you're using TLS enabled etcd uncomment the following.
-  # You must also populate the Secret below with these files.
-  #etcd_ca: ""   # "/grid-secrets/etcd-ca"
-  #etcd_cert: "" # "/grid-secrets/etcd-cert"
-  #etcd_key: ""  # "/grid-secrets/etcd-key"
-  # Configure the Calico backend to use.
-
   # Configure the MTU to use
+  log_level: "debug"
   veth_mtu: "1500"
 
 ---
@@ -34,7 +27,7 @@ kind: DaemonSet
 apiVersion: extensions/v1beta1
 metadata:
   name: install-cni
-  namespace: kube-system
+  namespace: cni
 spec:
   updateStrategy:
     type: RollingUpdate
@@ -62,7 +55,7 @@ spec:
         # This container installs the Calico CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: socp.io/library/install-cni:0917
+          image: socp.io/library/install-cni:v3
           command: ["/install-cni.sh"]
           env:
             # Name of the CNI config file to create.
@@ -80,6 +73,11 @@ spec:
                 configMapKeyRef:
                   name: grid-config
                   key: veth_mtu
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: grid-config
+                  key: log_level
           volumeMounts:
             - mountPath: /host/opt/cni/bin
               name: cni-bin-dir
@@ -120,7 +118,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: grid-cni-plugin
-  namespace: kube-system
+  namespace: cni
 
 ---
 kind: ClusterRole
@@ -137,5 +135,5 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: grid-cni-plugin
-  namespace: kube-system
+  namespace: cni
 

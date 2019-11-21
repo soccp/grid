@@ -1,5 +1,6 @@
 #!/bin/sh
 
+echo "VERSION V3"
 set -u -e
 
 ip addr show br0 |grep 'inet'|sed 's/^.*inet //g' |grep -v inet6 | sed 's:/24.*$::g' > /var/lib/grid/nodename
