@@ -1,0 +1,139 @@
+# Calico Version v3.2.3
+# https://docs.projectcalico.org/v3.2/releases#v3.2.3
+# This manifest includes the following component versions:
+#   calico/node:v3.2.3
+#   calico/cni:v3.2.3
+#   calico/kube-controllers:v3.2.3
+
+# This ConfigMap is used to configure a self-hosted Calico installation.
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: grid-config
+  namespace: cni
+data:
+  # Configure this with the location of your etcd cluster.
+  etcd_endpoints: "https://172.16.30.100:2379"
+  # Configure the MTU to use
+  log_level: "debug"
+  veth_mtu: "1500"
+
+---
+
+# This manifest installs the calico/node container, as well
+# as the Calico CNI plugins and network config on
+# each master and worker node in a Kubernetes cluster.
+kind: DaemonSet
+apiVersion: extensions/v1beta1
+metadata:
+  name: install-cni
+  namespace: cni
+spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: install-cni
+      annotations:
+        # This, along with the CriticalAddonsOnly toleration below,
+        # marks the pod as a critical add-on, ensuring it gets
+        # priority scheduling and that its resources are reserved
+        # if it ever gets evicted.
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      hostNetwork: true
+      nodeSelector:
+        beta.kubernetes.io/arch: amd64
+      tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      serviceAccountName: grid-cni-plugin
+      containers:
+        # This container installs the Calico CNI binaries
+        # and CNI network config file on each node.
+        - name: install-cni
+          image: socp.io/library/install-cni:v3
+          command: ["/install-cni.sh"]
+          env:
+            # Name of the CNI config file to create.
+            - name: CNI_CONF_NAME
+              value: "10-grid.conflist"
+            # The location of the Calico etcd cluster.
+            - name: ETCD_ENDPOINTS
+              valueFrom:
+                configMapKeyRef:
+                  name: grid-config
+                  key: etcd_endpoints
+            # CNI MTU Config variable
+            - name: CNI_MTU
+              valueFrom:
+                configMapKeyRef:
+                  name: grid-config
+                  key: veth_mtu
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: grid-config
+                  key: log_level
+          volumeMounts:
+            - mountPath: /host/opt/cni/bin
+              name: cni-bin-dir
+            - mountPath: /host/etc/cni/net.d
+              name: cni-net-dir
+            - mountPath: /grid-secrets
+              name: etcd-certs
+            - mountPath: /var/lib/grid
+              name: grid
+          securityContext:
+            privileged: true
+      volumes:
+        # Used to install CNI.
+        - name: cni-bin-dir
+          hostPath:
+            path: /opt/cni/bin
+        - name: cni-net-dir
+          hostPath:
+            path: /etc/cni/net.d
+        - name: grid
+          hostPath:
+            path: /var/lib/grid
+        # Mount in the etcd TLS secrets with mode 400.
+        # See https://kubernetes.io/docs/concepts/configuration/secret/
+        - name: etcd-certs
+          secret:
+            secretName: etcd-certs
+            defaultMode: 0400
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: grid-cni-plugin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: grid-cni-plugin
+subjects:
+- kind: ServiceAccount
+  name: grid-cni-plugin
+  namespace: cni
+
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: grid-cni-plugin
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs:
+      - get
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: grid-cni-plugin
+  namespace: cni
+

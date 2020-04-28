@@ -491,6 +491,7 @@ func main() {
 	}
 	if *version {
 		fmt.Println(VERSION)
+		fmt.Println("grid v3")
 		os.Exit(0)
 	}
 

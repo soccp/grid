@@ -39,6 +39,7 @@ import (
 	cnet "github.com/projectcalico/libcalico-go/lib/net"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	"github.com/sirupsen/logrus"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -262,10 +263,10 @@ func CmdAddK8s(ctx context.Context, args *skel.CmdArgs, conf types.NetConf, epID
 			cli, err := clientv3.New(clientv3.Config{
 				Endpoints:   strings.Split(conf.EtcdEndpoints, ","),
 				TLS:         tls,
-				DialTimeout: 3 * time.Second,
+				DialTimeout: 10 * time.Second,
 			})
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("could not initialize etcdv3 client: %+v", err)
 			}
 			logger.Debugf("Init etcd client OK")
 			defer cli.Close()
@@ -479,7 +480,7 @@ func CmdAddK8s(ctx context.Context, args *skel.CmdArgs, conf types.NetConf, epID
 		cli, err := clientv3.New(clientv3.Config{
 			Endpoints:   strings.Split(conf.EtcdEndpoints, ","),
 			TLS:         tls,
-			DialTimeout: 3 * time.Second,
+			DialTimeout: 10 * time.Second,
 		})
 
 		if err != nil {
@@ -491,7 +492,9 @@ func CmdAddK8s(ctx context.Context, args *skel.CmdArgs, conf types.NetConf, epID
 		_, err = cli.Put(ctx, etcdpath, podip)
 		cancel()
 		if err != nil {
-			logger.Errorln(err)
+			logger.Errorf("Put bindip to etcd failed for %s:%s Release it %s", endpoint.Namespace, endpoint.Name, podip)
+			releaseIPAM()
+			return nil, fmt.Errorf("Put bindip to etcd failed for %s:%s Release it %s", endpoint.Namespace, endpoint.Name, podip)
 		}
 	}
 	return result, nil
@@ -564,13 +567,22 @@ func CmdDelK8s(ctx context.Context, c calicoclient.Interface, epIDs utils.WEPIde
 		var exist bool
 		if podowner == "deployment" {
 			logger.Debugf("Deploy name is %s", podownername)
-			exist = getK8sDeploymentInfo(client, podownername, epIDs.Namespace)
+			exist, err = getK8sDeploymentInfo(client, podownername, epIDs.Namespace)
+			if err != nil {
+				return err
+			}
 		} else if podowner == "statefulset" {
 			logger.Debugf("StatefulSet name is %s", podownername)
-			exist = getK8sStatefulSetInfo(client, podownername, epIDs.Namespace)
+			exist, err = getK8sStatefulSetInfo(client, podownername, epIDs.Namespace)
+			if err != nil {
+				return err
+			}
 		} else {
 			logger.Debugf("Daemonset name is %s", podownername)
-			exist = getK8sDaemonSetInfo(client, podownername, epIDs.Namespace)
+			exist, err = getK8sDaemonSetInfo(client, podownername, epIDs.Namespace)
+			if err != nil {
+				return err
+			}
 		}
 		if exist {
 			ipamErr = nil
@@ -592,7 +604,7 @@ func CmdDelK8s(ctx context.Context, c calicoclient.Interface, epIDs utils.WEPIde
 			cli, err := clientv3.New(clientv3.Config{
 				Endpoints:   strings.Split(conf.EtcdEndpoints, ","),
 				TLS:         tls,
-				DialTimeout: 3 * time.Second,
+				DialTimeout: 10 * time.Second,
 			})
 			if err != nil {
 				return err
@@ -970,43 +982,58 @@ func getK8sPodInfo(client *kubernetes.Clientset, podName, podNamespace string) (
 }
 
 //zk
-func getK8sDeploymentInfo(client *kubernetes.Clientset, name, namespace string) (exist bool) {
+func getK8sDeploymentInfo(client *kubernetes.Clientset, name, namespace string) (exist bool, err error) {
 	deploy, err := client.AppsV1().Deployments(string(namespace)).Get(name, metav1.GetOptions{})
+	//logrus.Debugf("deployment info %+v", deploy)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			logrus.Debugln(err)
+			return false, nil
+		}
+		logrus.Debugf("Get Deploy for %s:%s error %v", namespace, name, err)
+		return true, err
+	}
 	logrus.Debugf("deployment info %+v", deploy)
-	if err != nil {
-		logrus.Debugln(err)
-		return false
-	}
-	if deploy.Status.Replicas != 0 {
-		return true
-	}
-	return false
+	/*if deploy.Status.Replicas != 0 {
+		return true, nil
+	}*/
+	return true, nil
 }
 
-func getK8sStatefulSetInfo(client *kubernetes.Clientset, name, namespace string) (exist bool) {
+func getK8sStatefulSetInfo(client *kubernetes.Clientset, name, namespace string) (exist bool, err error) {
 	sts, err := client.AppsV1().StatefulSets(string(namespace)).Get(name, metav1.GetOptions{})
-	logrus.Debugf("statefulset info %+v", sts)
+	//logrus.Debugf("statefulset info %+v", sts)
 	if err != nil {
-		logrus.Debugln(err)
-		return false
+		if kerrors.IsNotFound(err) {
+			logrus.Debugln(err)
+			return false, nil
+		}
+		logrus.Debugf("Get StatefulSet for %s:%s error %v", namespace, name, err)
+		return true, err
 	}
-	if *sts.Spec.Replicas != 0 {
-		return true
-	}
-	return false
+	logrus.Debugf("statefulset info %+v", sts)
+	/*if *sts.Spec.Replicas != 0 {
+		return true, nil
+	}*/
+	return true, nil
 }
 
-func getK8sDaemonSetInfo(client *kubernetes.Clientset, name, namespace string) (exist bool) {
+func getK8sDaemonSetInfo(client *kubernetes.Clientset, name, namespace string) (exist bool, err error) {
 	ds, err := client.AppsV1().DaemonSets(string(namespace)).Get(name, metav1.GetOptions{})
-	logrus.Debugf("daemonset info %+v", ds)
+	//logrus.Debugf("daemonset info %+v", ds)
 	if err != nil {
-		logrus.Debugln(err)
-		return false
+		if kerrors.IsNotFound(err) {
+			logrus.Debugln(err)
+			return false, nil
+		}
+		logrus.Debugf("Get DaemonSet for %s:%s error %v", namespace, name, err)
+		return true, err
 	}
-	if ds.Status.CurrentNumberScheduled != 0 {
-		return true
-	}
-	return false
+	logrus.Debugf("daemonset info %+v", ds)
+	/*if ds.Status.CurrentNumberScheduled != 0 {
+		return true, nil
+	}*/
+	return true, nil
 }
 
 func getPodCidr(client *kubernetes.Clientset, conf types.NetConf, nodename string) (string, error) {

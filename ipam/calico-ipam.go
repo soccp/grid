@@ -58,6 +58,7 @@ func main() {
 
 	if *version {
 		fmt.Println(VERSION)
+		fmt.Println("grid-ipam v3")
 		os.Exit(0)
 	}
 
