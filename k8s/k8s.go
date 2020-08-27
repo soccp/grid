@@ -958,12 +958,6 @@ func getK8sPodInfo(client *kubernetes.Clientset, podName, podNamespace string) (
 	// zk
 	if pod.Annotations["keepip"] == "true" {
 		//podowner = "deployment"
-		if _, ok := labels["workload.user.cattle.io/workloadselector"]; ok {
-			podownerinfo := labels["workload.user.cattle.io/workloadselector"]
-			field := strings.Split(podownerinfo, "-")
-			podowner = strings.ToLower(field[0])
-			podownername = strings.Join(field[2:], "-")
-		} else {
 			p := strings.Split(generateName, "-")
 			//logrus.Debugf("PODINFO %v", kvp.Value.(*api.WorkloadEndpoint).OwnerReferences)
 			//podownerinfo := kvp.Value.(*api.WorkloadEndpoint).OwnerReferences[0].Kind
@@ -976,7 +970,6 @@ func getK8sPodInfo(client *kubernetes.Clientset, podName, podNamespace string) (
 				podownername = strings.Join(p[:(len(p)-1)], "-")
 			}
 		}
-	}
 
 	return labels, pod.Annotations, ports, profiles, generateName, podowner, podownername, nil
 }
